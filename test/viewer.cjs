@@ -17,8 +17,6 @@ function makePdf(pages) {
 	const kids = [];
 	for (let i = 0; i < pages; i++) {
 		let text = `BT /F1 24 Tf 60 760 Td (Page ${i + 1} of ${pages}) Tj ET\n`;
-		// Two tightly leaded lines (24 pt type on a 22 pt pitch) whose font boxes overlap.
-		text += `BT /F1 24 Tf 300 800 Td (Tight one) Tj ET\nBT /F1 24 Tf 300 778 Td (Tight two) Tj ET\n`;
 		for (let l = 0; l < 20; l++) text += `BT /F1 12 Tf 60 ${700 - l * 28} Td (Line ${l + 1}: the quick brown fox jumps over the lazy dog.) Tj ET\n`;
 		const content = add(`<< /Length ${text.length} >>\nstream\n${text}endstream`);
 		kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${content} 0 R >>`));
@@ -150,23 +148,6 @@ const files = {
 	const hlLeft = await count();
 	check("the eraser removes a text highlight", hlLeft === 0, String(hlLeft));
 	await click(".pdf-ink-toolbar [aria-label^='Eraser']");
-	// Two separate highlights on tightly leaded lines meet instead of stacking.
-	await click(".pdf-ink-text-highlight");
-	await page.waitForTimeout(100);
-	for (const base of [800, 778]) {
-		const z = r0.width / 595;
-		const ty = r0.y + (842 - base - 7) * z, tx0 = r0.x + 295 * z, tx1 = r0.x + 400 * z;
-		await page.mouse.move(tx0, ty);
-		await page.mouse.down();
-		for (let i = 1; i <= 8; i++) await page.mouse.move(tx0 + ((tx1 - tx0) * i) / 8, ty);
-		await page.mouse.up();
-		await page.waitForTimeout(600);
-	}
-	const tight = await api(`ann.getAnnotations().map((a) => a.object.segmentRects.map((r) => [r.origin.y, r.origin.y + r.size.height])).flat().sort((a, b) => a[0] - b[0])`);
-	check("highlights on adjacent tight lines do not overlap", tight.length === 2 && tight[0][1] <= tight[1][0] + 0.01 && tight[0][1] > tight[0][0] && tight[1][1] > tight[1][0], JSON.stringify(tight));
-	await api(`ann.getAnnotations().forEach((a) => ann.deleteAnnotation(a.object.pageIndex, a.object.id))`);
-	await page.waitForTimeout(300);
-	await click(".pdf-ink-text-highlight");
 
 	// Pen: a toolbar swatch picks the ink tool in that colour, a stroke becomes an annotation.
 	const color = await page.evaluate(() => {

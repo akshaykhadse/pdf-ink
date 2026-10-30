@@ -22,7 +22,7 @@ import { ExportPluginPackage } from "@embedpdf/plugin-export/preact";
 import { Toolbar } from "./toolbar";
 import { PointerGuard } from "./guard";
 import type { Settings } from "./settings";
-import { installAnnotationFixes } from "./ink";
+import { installInkSmoothing } from "./ink";
 
 /** What the Obsidian view gets once a document is open. */
 export interface ViewerHandle {
@@ -93,7 +93,7 @@ function App(props: ViewerProps & { version: number }) {
 			const opened: { documentId: string; task: any } = await settle(documents.openDocumentBuffer({ buffer: props.bytes, name: props.name }));
 			await settle(opened.task);
 			const documentId = opened.documentId;
-			installAnnotationFixes(registry.getPlugin("annotation"), registry.getPlugin("selection"), () => props.settings.smoothStrokes);
+			installInkSmoothing(registry.getPlugin("annotation"), () => props.settings.smoothStrokes);
 			const annotations: any = (registry.getPlugin("annotation") as any)?.provides();
 			const scoped = annotations?.forDocument(documentId);
 			scoped?.onAnnotationEvent?.((event: { type: string }) => {
