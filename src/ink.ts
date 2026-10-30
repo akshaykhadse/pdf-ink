@@ -127,9 +127,40 @@ export function tidyHighlightRects(rects: Rect[]): Rect[] {
 	return out.map((r) => ({ origin: { x: r.left, y: r.top }, size: { width: r.right - r.left, height: r.bottom - r.top } }));
 }
 
-function tidyHighlightAnnotation<T extends { type?: number; segmentRects?: Rect[]; rect?: Rect }>(annotation: T): T {
-	if (annotation.type !== HIGHLIGHT || !Array.isArray(annotation.segmentRects) || annotation.segmentRects.length < 2) return annotation;
-	return { ...annotation, segmentRects: tidyHighlightRects(annotation.segmentRects) };
+/** A text run as EmbedPDF's selection geometry describes it (PDF points, y down). */
+export interface TextRun {
+	rect: { x: number; y: number; width: number; height: number };
+}
+
+/**
+ * Clips each highlight box against the page's other text lines: where a
+ * neighbouring line's box reaches into this one, the boundary moves to the
+ * middle of the overlap. Two highlights on adjacent lines then meet exactly
+ * instead of stacking, whether or not they belong to the same annotation.
+ */
+export function clipHighlightToLines(rects: Rect[], runs: TextRun[]): Rect[] {
+	return rects.map((r) => {
+		let top = r.origin.y, bottom = r.origin.y + r.size.height;
+		const left = r.origin.x, right = r.origin.x + r.size.width;
+		for (const run of runs) {
+			const b = run?.rect;
+			if (!b || b.width <= 0 || b.height <= 0) continue;
+			if (b.x + b.width <= left || b.x >= right) continue; // other column
+			const center = b.y + b.height / 2;
+			if (center >= top && center <= bottom) continue; // this line's own text
+			const runBottom = b.y + b.height;
+			if (center < top && runBottom > top) top = Math.min(bottom, Math.max(top, (runBottom + r.origin.y) / 2));
+			else if (center > bottom && b.y < bottom) bottom = Math.max(top, Math.min(bottom, (b.y + r.origin.y + r.size.height) / 2));
+		}
+		return { origin: { x: left, y: top }, size: { width: right - left, height: bottom - top } };
+	});
+}
+
+function tidyHighlightAnnotation<T extends { type?: number; segmentRects?: Rect[]; rect?: Rect }>(annotation: T, runs: TextRun[] | undefined): T {
+	if (annotation.type !== HIGHLIGHT || !Array.isArray(annotation.segmentRects) || annotation.segmentRects.length === 0) return annotation;
+	let segmentRects = runs?.length ? clipHighlightToLines(annotation.segmentRects, runs) : annotation.segmentRects;
+	if (segmentRects.length > 1) segmentRects = tidyHighlightRects(segmentRects);
+	return { ...annotation, segmentRects };
 }
 
 /**
@@ -137,7 +168,7 @@ function tidyHighlightAnnotation<T extends { type?: number; segmentRects?: Rect[
  * smoothed first and text highlights get non-overlapping line boxes. Done on the plugin instance (not the per-document scope)
  * so it runs before the history entry is recorded.
  */
-export function installInkSmoothing(annotationPlugin: any, enabled: () => boolean): void {
+export function installAnnotationFixes(annotationPlugin: any, selectionPlugin: any, enabled: () => boolean): void {
 	if (!annotationPlugin) return;
 	if (annotationPlugin.__pdfInkSmoothing) {
 		annotationPlugin.__pdfInkSmoothing = enabled;
@@ -146,9 +177,17 @@ export function installInkSmoothing(annotationPlugin: any, enabled: () => boolea
 	const original = annotationPlugin.createAnnotation;
 	if (typeof original !== "function") return;
 	annotationPlugin.__pdfInkSmoothing = enabled;
-	annotationPlugin.createAnnotation = function (pageIndex: number, annotation: any, ...rest: unknown[]) {
+	const textRuns = (pageIndex: number, documentId: unknown): TextRun[] | undefined => {
+		try {
+			const id = documentId ?? annotationPlugin.getActiveDocumentId?.();
+			return selectionPlugin?.getDocumentState?.(id)?.geometry?.[pageIndex]?.runs;
+		} catch {
+			return undefined;
+		}
+	};
+	annotationPlugin.createAnnotation = function (pageIndex: number, annotation: any, ctx?: unknown, documentId?: unknown, ...rest: unknown[]) {
 		const on = annotationPlugin.__pdfInkSmoothing;
-		const fixed = tidyHighlightAnnotation(on() ? smoothInkAnnotation(annotation) : annotation);
-		return original.call(this, pageIndex, fixed, ...rest);
+		const fixed = tidyHighlightAnnotation(on() ? smoothInkAnnotation(annotation) : annotation, textRuns(pageIndex, documentId));
+		return original.call(this, pageIndex, fixed, ctx, documentId, ...rest);
 	};
 }

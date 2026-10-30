@@ -1,6 +1,6 @@
 // Pure-function checks for src/ink.ts (built to test/out/ink.cjs by scripts/build.mjs test).
 const assert = require("node:assert/strict");
-const { smoothStroke, tidyHighlightRects } = require("./out/ink.cjs");
+const { smoothStroke, tidyHighlightRects, clipHighlightToLines } = require("./out/ink.cjs");
 
 let failed = false;
 const check = (name, fn) => {
@@ -39,6 +39,21 @@ check("overlapping highlight lines are split at the middle of the overlap", () =
 	// Boxes in different columns are left alone.
 	const cols = tidyHighlightRects([r(0, 0, 50, 40), r(100, 30, 50, 40)]);
 	assert.equal(cols[0].size.height, 40);
+});
+
+check("a highlight box is clipped halfway to the neighbouring text lines", () => {
+	const r = (x, y, w, h) => ({ origin: { x, y }, size: { width: w, height: h } });
+	// Lines 22 apart with 28-tall boxes: the middle line's box runs 3 into each neighbour.
+	const runs = [{ rect: { x: 0, y: 0, width: 200, height: 28 } }, { rect: { x: 0, y: 22, width: 200, height: 28 } }, { rect: { x: 0, y: 44, width: 200, height: 28 } }];
+	const [mid] = clipHighlightToLines([r(0, 22, 200, 28)], runs);
+	assert.equal(mid.origin.y, 25);
+	assert.equal(mid.origin.y + mid.size.height, 47);
+	const [top] = clipHighlightToLines([r(0, 0, 200, 28)], runs);
+	assert.equal(top.origin.y, 0);
+	assert.equal(top.origin.y + top.size.height, 25);
+	// A line in another column does not clip.
+	const [alone] = clipHighlightToLines([r(0, 22, 100, 28)], [{ rect: { x: 150, y: 0, width: 100, height: 28 } }]);
+	assert.equal(alone.size.height, 28);
 });
 
 if (failed) process.exit(1);
