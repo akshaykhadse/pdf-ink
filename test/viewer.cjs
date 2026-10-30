@@ -392,17 +392,23 @@ const files = {
 	await click(".pdf-ink-stylus");
 	await page.waitForTimeout(100);
 
-	// --- the pen's side button arms the eraser for one stroke
+	// --- the pen's side button toggles the eraser
 	const n3 = await count();
 	await pen("pointermove", x, y - 60, { buttons: 1, pressure: 0 });
+	await pen("pointermove", x + 2, y - 60, { buttons: 1, pressure: 0 }); // still held: no second toggle
 	const armed = await page.evaluate(() => document.querySelector('.pdf-ink-toolbar [data-tool="eraser"]').classList.contains("is-active"));
+	check("a press of the pen's side button switches to the eraser", armed && (await api(`tools.tool`)) === "eraser", `armed ${armed}, tool ${await api(`tools.tool`)}`);
+	await pen("pointermove", x, y - 60, { buttons: 0, pressure: 0 }); // released
 	await pen("pointerdown", x + 40, y - 30, { buttons: 1, pressure: 0.5 });
 	for (let i = 1; i <= 6; i++) await pen("pointermove", x + 40, y - 30 + i * 10, { buttons: 1, pressure: 0.5 });
 	await pen("pointerup", x + 40, y + 30, { buttons: 0, pressure: 0 });
 	await page.waitForTimeout(300);
 	const n4 = await count();
-	const toolAfter = await api(`[tools.tool, tools.penEraser, ann.getActiveTool()?.id]`);
-	check("the pen's side button arms the eraser for one stroke, then the pen returns", armed && n4 < n3 && toolAfter[0] === "pen" && toolAfter[1] === false && toolAfter[2] === "ink", `armed ${armed}, ${n3} -> ${n4}, ${JSON.stringify(toolAfter)}`);
+	check("the eraser stays on after a stroke", n4 < n3 && (await api(`tools.tool`)) === "eraser", `${n3} -> ${n4}, tool ${await api(`tools.tool`)}`);
+	await pen("pointermove", x, y - 60, { buttons: 1, pressure: 0 }); // second press
+	await pen("pointermove", x, y - 60, { buttons: 0, pressure: 0 });
+	const toolAfter = await api(`[tools.tool, ann.getActiveTool()?.id]`);
+	check("the next press returns to the previous tool", toolAfter[0] === "pen" && toolAfter[1] === "ink", JSON.stringify(toolAfter));
 
 	// --- area link
 	await tool("areaLink");

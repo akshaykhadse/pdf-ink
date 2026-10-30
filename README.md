@@ -14,7 +14,7 @@ One tool is active at a time, picked on the floating toolbar:
 | Pen | Freehand ink with colour, width and opacity | native `ink` tool |
 | Highlighter | Translucent freehand marker | native `inkHighlighter` tool |
 | Text highlighter | Select text to highlight it | native `highlight` tool |
-| Eraser | Remove the strokes and highlights the pointer crosses; a pen's side button while hovering erases one stroke | plugin addition |
+| Eraser | Remove the strokes and highlights the pointer crosses; pressing the pen's side button while hovering switches to the eraser, pressing it again returns to the previous tool | plugin addition |
 | Area link | Drag a box; copy it as a link or embed | native capture marquee, link formatting is a plugin addition |
 
 **Stylus mode** (toolbar button, off by default): fingers pan and scroll while

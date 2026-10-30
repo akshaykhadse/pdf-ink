@@ -104,7 +104,7 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 	const styled = STYLED_TOOLS.has(state.tool);
 
 	const toolButton = (t: ToolDef) => (
-		<button key={t.id} class={"pdf-ink-btn pdf-ink-tool" + (state.tool === t.id || (t.id === "eraser" && state.penEraser) ? " is-active" : "")} aria-label={t.label} data-tool={t.id} onClick={() => pick(t.id)}>
+		<button key={t.id} class={"pdf-ink-btn pdf-ink-tool" + (state.tool === t.id ? " is-active" : "")} aria-label={t.label} data-tool={t.id} onClick={() => pick(t.id)}>
 			<Icon name={t.icon} />
 		</button>
 	);

@@ -6,8 +6,8 @@
  *    fling, two fingers reach EmbedPDF's pinch zoom, which listens to touch
  *    events and is left alone).
  *  - The eraser: pen and mouse events are intercepted and matched against the
- *    annotations of the page under the pointer. A pen's side button while
- *    hovering arms the eraser for one stroke.
+ *    annotations of the page under the pointer. A press of the pen's side
+ *    button while hovering switches to the eraser, and the next press back.
  *  - Full pen sample rate: browsers deliver one pointermove per frame and fold
  *    the rest into getCoalescedEvents(); EmbedPDF reads only the event itself,
  *    so the folded samples are re-dispatched ahead of it.
@@ -64,6 +64,8 @@ export function annotationHit(a: any, x: number, y: number, radius: number): boo
 }
 
 export class PointerGuard {
+	/** Whether the pen's side button was down on the last hover sample. */
+	private buttonHeld = false;
 	private readonly cursor: HTMLElement;
 	private readonly off: (() => void)[] = [];
 	/** Fingers whose events are kept from EmbedPDF (decided when they land). */
@@ -142,7 +144,7 @@ export class PointerGuard {
 	// ----------------------------------------------------------------- helpers
 
 	private eraserActive() {
-		return this.tools.tool === "eraser" || this.tools.penEraser;
+		return this.tools.tool === "eraser";
 	}
 
 	private blockingFingers(): boolean {
@@ -320,11 +322,11 @@ export class PointerGuard {
 			this.penAt.x = e.clientX;
 			this.penAt.y = e.clientY;
 		}
-		if (e.pointerType === "pen" && !down && this.tools.drawing) {
-			// Side button while hovering: buttons pressed, no pointerdown, no pressure.
+		if (e.pointerType === "pen" && !down) {
+			// Side button while hovering: buttons pressed, no pointerdown, no pressure. Each press toggles the eraser.
 			const pressed = (e.buttons & ERASER_BUTTONS) !== 0 && e.pressure === 0;
-			if (pressed && !this.eraserActive()) this.tools.setPenEraser(true);
-			else if (!pressed && this.tools.penEraser && e.buttons === 0) this.tools.setPenEraser(false);
+			if (pressed && !this.buttonHeld) this.tools.toggleEraser();
+			this.buttonHeld = pressed;
 		}
 		if (down) {
 			if (!this.pens.get(e.pointerId)) {
@@ -363,7 +365,6 @@ export class PointerGuard {
 		if (!intercepted) return;
 		e.stopPropagation();
 		e.preventDefault();
-		if (this.tools.penEraser && wasPen) this.tools.setPenEraser(false); // one stroke only
 	}
 
 	private startFling(s: { vx: number; vy: number; el: HTMLElement }) {

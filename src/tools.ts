@@ -24,7 +24,6 @@ const EMBED_TOOL: Record<string, string> = { pen: "ink", marker: "inkHighlighter
 
 export interface ToolState {
 	tool: ToolId;
-	penEraser: boolean;
 	stylusMode: boolean;
 	canUndo: boolean;
 	canRedo: boolean;
@@ -53,8 +52,8 @@ export class ToolController {
 	private canRedo = false;
 	/** True while the controller itself changes EmbedPDF's mode. */
 	private applying = false;
-	/** The eraser armed by the pen's side button; lasts one stroke. */
-	penEraser = false;
+	/** The tool to return to when the eraser is toggled off again. */
+	private previousTool: ToolId = "pen";
 
 	constructor(readonly registry: any, readonly documentId: string, readonly host: ToolHost) {
 		const im = this.interaction();
@@ -114,14 +113,13 @@ export class ToolController {
 		return this.drawing || this._tool === "pointer";
 	}
 
-	setPenEraser(on: boolean) {
-		if (this.penEraser === on) return;
-		this.penEraser = on;
-		this.notify();
+	/** The pen's side button: switch to the eraser, or back to the tool used before it. */
+	toggleEraser() {
+		this.setTool(this._tool === "eraser" ? this.previousTool : "eraser");
 	}
 
 	state(): ToolState {
-		return { tool: this._tool, penEraser: this.penEraser, stylusMode: this.stylusMode, canUndo: this.canUndo, canRedo: this.canRedo, zoom: this.zoom, page: this.page, pages: this.pages, fullscreen: this.host.isFullscreen() };
+		return { tool: this._tool, stylusMode: this.stylusMode, canUndo: this.canUndo, canRedo: this.canRedo, zoom: this.zoom, page: this.page, pages: this.pages, fullscreen: this.host.isFullscreen() };
 	}
 
 	subscribe(listener: () => void): () => void {
@@ -144,8 +142,8 @@ export class ToolController {
 		const im = this.interaction()?.forDocument(this.documentId);
 		const ann = this.annotations();
 		const capture = this.plugin("capture")?.forDocument(this.documentId);
+		if (tool === "eraser" && this._tool !== "eraser") this.previousTool = this._tool;
 		this._tool = tool;
-		this.penEraser = false;
 		this.applying = true;
 		try {
 			ann?.deselectAnnotation?.();
