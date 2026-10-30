@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (must match manifest.json)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - name: Check the version
+        run: |
+          test "$(node -p "require('./manifest.json').version")" = "${{ inputs.version }}"
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag "${{ inputs.version }}" || true
+          git push origin "${{ inputs.version }}" || true
+          gh release create "${{ inputs.version }}" main.js manifest.json styles.css pdfium.wasm --title "${{ inputs.version }}" --notes "PDF Ink ${{ inputs.version }}"
