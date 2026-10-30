@@ -22,7 +22,7 @@ const files = { "/harness.js": [path.join(out, "harness.js"), "text/javascript"]
 	await page.evaluate(() => document.querySelector('.pdf-ink-toolbar [data-tool="pen"]').click());
 	await page.waitForTimeout(300);
 	await page.screenshot({ path: path.join(out, "shot-1200.png"), clip: { x: 0, y: 0, width: 1200, height: 120 } });
-	for (const w of [700, 420, 340]) {
+	for (const w of [700, 420, 300]) {
 		await page.evaluate((w) => (document.getElementById("leaf").style.width = w + "px"), w);
 		await page.waitForTimeout(400);
 		await page.screenshot({ path: path.join(out, `shot-${w}.png`), clip: { x: 0, y: 0, width: w, height: 120 } });

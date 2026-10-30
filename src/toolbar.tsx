@@ -1,8 +1,9 @@
 /**
- * The floating toolbar. It measures itself and folds, step by step, as the
- * pane gets narrower: first the active tool's options go into a popover, then
- * zoom and page controls into the overflow menu, then undo/redo, sidecar and
- * full screen, and finally the drawing tools into one picker.
+ * The toolbar: one row of icon buttons. The active tool's colour, width and
+ * opacity live behind a single style button. The bar measures itself and
+ * folds as the pane gets narrower: zoom and page controls into the overflow
+ * menu, then undo/redo, sidecar and full screen, and finally the drawing
+ * tools into one picker.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
@@ -179,14 +180,9 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 						</>
 					)}
 				</div>
-				{styled && level === 0 && (
-					<div class="pdf-ink-group pdf-ink-options">
-						<ToolOptions tools={tools} settings={settings} />
-					</div>
-				)}
-				{styled && level > 0 && (
+				{styled && (
 					<div class="pdf-ink-group">
-						<button class={"pdf-ink-btn" + (popover === "options" ? " is-active" : "")} aria-label="Tool options" onClick={() => setPopover(popover === "options" ? null : "options")}>
+						<button class={"pdf-ink-btn pdf-ink-style" + (popover === "options" ? " is-open" : "")} aria-label="Tool options" onClick={() => setPopover(popover === "options" ? null : "options")}>
 							<span class="pdf-ink-dot" style={{ background: tools.style()?.color, width: dotSize(tools.style()?.width || 3), height: dotSize(tools.style()?.width || 3), opacity: tools.style()?.opacity }} />
 						</button>
 					</div>
@@ -210,7 +206,7 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 			</div>
 			{popover === "options" && styled && (
 				<Pop>
-					<ToolOptions tools={tools} settings={settings} vertical />
+					<ToolOptions tools={tools} settings={settings} />
 				</Pop>
 			)}
 			{popover === "tools" && (
@@ -245,14 +241,14 @@ function Pop({ children, menu }: { children: ComponentChildren; menu?: boolean }
 }
 
 /** Colour, width and opacity of the active styled tool. */
-function ToolOptions({ tools, settings, vertical }: { tools: ToolController; settings: Settings; vertical?: boolean }) {
+function ToolOptions({ tools, settings }: { tools: ToolController; settings: Settings }) {
 	const tool = tools.tool;
 	const style = tools.style(tool);
 	if (!style) return null;
 	const colors = tool === "pen" ? settings.penColors : settings.highlightColors;
 	const widths = tool === "pen" ? settings.penWidths : tool === "marker" ? settings.markerWidths : [];
 	return (
-		<div class={"pdf-ink-tool-options" + (vertical ? " is-vertical" : "")}>
+		<div class="pdf-ink-tool-options">
 			<div class="pdf-ink-group pdf-ink-swatches">
 				{colors.map((c) => (
 					<button key={c} class={"pdf-ink-swatch" + (style.color === c ? " is-active" : "")} aria-label={`Colour ${c}`} onClick={() => tools.setStyle(tool, { color: c })}>

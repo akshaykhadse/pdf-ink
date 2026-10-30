@@ -205,9 +205,16 @@ const files = {
 	// --- pen: colour, width, opacity, smoothing, stroke over stroke
 	await tool("pen");
 	check("the pen activates EmbedPDF's ink tool", (await api(`ann.getActiveTool()?.id`)) === "ink");
-	await page.evaluate(() => document.querySelectorAll(".pdf-ink-toolbar .pdf-ink-swatches .pdf-ink-swatch")[2].click());
-	await page.evaluate(() => document.querySelectorAll(".pdf-ink-toolbar .pdf-ink-widths .pdf-ink-swatch")[2].click());
+	const openStyle = async () => {
+		if (!(await page.$(".pdf-ink-popover .pdf-ink-swatches"))) await click('.pdf-ink-toolbar [aria-label="Tool options"]');
+		await page.waitForTimeout(80);
+	};
+	await openStyle();
+	await page.evaluate(() => document.querySelectorAll(".pdf-ink-popover .pdf-ink-swatches .pdf-ink-swatch")[2].click());
+	await page.evaluate(() => document.querySelectorAll(".pdf-ink-popover .pdf-ink-widths .pdf-ink-swatch")[2].click());
 	await page.waitForTimeout(100);
+	check("the style popover shows the swatches, widths and opacity; the bar itself holds one style button", (await page.evaluate(() => [document.querySelectorAll(".pdf-ink-popover .pdf-ink-swatch").length, document.querySelectorAll(".pdf-ink-toolbar .pdf-ink-swatch").length, document.querySelectorAll(".pdf-ink-toolbar .pdf-ink-style").length])).join() === "9,0,1");
+	await page.mouse.click(x, y + 500); // closes the popover
 	await stroke(x, y);
 	const inkProps = await api(`(() => { const o = ann.getAnnotations()[0]?.object; return o && [o.type, o.strokeColor, o.strokeWidth, o.opacity, o.inkList[0].points.length, window.view.dirty]; })()`);
 	check("a pen stroke becomes an ink annotation with the chosen colour and width", inkProps && inkProps[0] === 15 && inkProps[1] === "#e03131" && inkProps[2] === 4 && inkProps[3] === 1 && inkProps[5] === true, JSON.stringify(inkProps));
@@ -216,8 +223,9 @@ const files = {
 	const over = await api(`[ann.getAnnotations().length, ann.getSelectedAnnotations().length]`);
 	check("a stroke starting on an earlier stroke draws rather than selecting it", over[0] === 2 && over[1] === 0, JSON.stringify(over));
 	// opacity slider
+	await openStyle();
 	await page.evaluate(() => {
-		const r = document.querySelector(".pdf-ink-toolbar .pdf-ink-opacity input");
+		const r = document.querySelector(".pdf-ink-popover .pdf-ink-opacity input");
 		r.value = "40";
 		r.dispatchEvent(new Event("input", { bubbles: true }));
 	});
@@ -283,7 +291,10 @@ const files = {
 	const mk = await api(`(() => { const o = ann.getAnnotations().at(-1).object; return [o.type, o.intent, o.strokeColor, o.strokeWidth, o.opacity]; })()`);
 	check("the highlighter makes a translucent ink highlight", mk[0] === 15 && mk[1] === "InkHighlight" && mk[2] === "#ffe066" && mk[3] === 14 && mk[4] === 0.5, JSON.stringify(mk));
 	await tool("textHighlight");
-	await page.evaluate(() => document.querySelectorAll(".pdf-ink-toolbar .pdf-ink-swatches .pdf-ink-swatch")[1].click());
+	await openStyle();
+	await page.evaluate(() => document.querySelectorAll(".pdf-ink-popover .pdf-ink-swatches .pdf-ink-swatch")[1].click());
+	await page.mouse.click(x, y + 500);
+	await page.waitForTimeout(100);
 	await drag(textX0, textY, textX1, textY, 8, 600);
 	const th = await api(`(() => { const o = ann.getAnnotations().at(-1).object; return [o.type, o.color, o.segmentRects?.length, ann.getAnnotations().length]; })()`);
 	check("the text highlighter highlights the selected text in its colour", th[0] === 9 && th[1] === "#8ce99a" && th[2] >= 1 && th[3] === 5, JSON.stringify(th));
@@ -382,7 +393,7 @@ const files = {
 	// --- toolbar folding
 	await tool("pen");
 	const level = () => page.evaluate(() => Number(document.querySelector(".pdf-ink-toolbar-host").dataset.level));
-	check("at 1200px the toolbar shows everything", (await level()) === 0 && (await page.evaluate(() => !!document.querySelector(".pdf-ink-toolbar .pdf-ink-swatches"))));
+	check("at 1200px the toolbar shows everything", (await level()) === 0 && (await page.evaluate(() => !!document.querySelector(".pdf-ink-zoom-level"))));
 	await page.evaluate(() => (document.getElementById("leaf").style.width = "640px"));
 	await page.waitForTimeout(400);
 	const l640 = await level();
@@ -390,18 +401,18 @@ const files = {
 		const t = document.querySelector(".pdf-ink-toolbar");
 		return t.scrollWidth <= t.clientWidth + 1 && t.getBoundingClientRect().right <= 640;
 	});
-	check("at 640px the toolbar folds (options into a popover) and fits", l640 >= 1 && fits && !(await page.evaluate(() => !!document.querySelector(".pdf-ink-toolbar .pdf-ink-swatches"))), `level ${l640}`);
+	check("at 640px the toolbar still fits", fits, `level ${l640}`);
 	await click('.pdf-ink-toolbar [aria-label="Tool options"]');
 	await page.waitForTimeout(100);
 	const popSwatches = await page.evaluate(() => document.querySelectorAll(".pdf-ink-popover .pdf-ink-swatches .pdf-ink-swatch").length);
 	check("the tool options popover holds the swatches", popSwatches === 6, popSwatches);
 	await page.evaluate(() => document.querySelectorAll(".pdf-ink-popover .pdf-ink-swatches .pdf-ink-swatch")[4].click());
 	check("picking a colour in the popover changes the pen", (await page.evaluate(() => window.settings.pen.color)) === "#f08c00");
-	await page.evaluate(() => (document.getElementById("leaf").style.width = "360px"));
+	await page.evaluate(() => (document.getElementById("leaf").style.width = "300px"));
 	await page.waitForTimeout(500);
 	const l360 = await level();
-	const fits360 = await page.evaluate(() => document.querySelector(".pdf-ink-toolbar").getBoundingClientRect().right <= 360);
-	check("at 360px the toolbar folds to one drawing tool and a menu", l360 === 4 && fits360 && (await page.evaluate(() => !!document.querySelector(".pdf-ink-more") && document.querySelectorAll(".pdf-ink-toolbar [data-tool]").length === 3)), `level ${l360}`);
+	const fits360 = await page.evaluate(() => document.querySelector(".pdf-ink-toolbar").getBoundingClientRect().right <= 300);
+	check("at 300px the toolbar folds to one drawing tool and a menu", l360 === 4 && fits360 && (await page.evaluate(() => !!document.querySelector(".pdf-ink-more") && document.querySelectorAll(".pdf-ink-toolbar [data-tool]").length === 3)), `level ${l360}`);
 	await click(".pdf-ink-more");
 	await page.waitForTimeout(100);
 	const more = await page.evaluate(() => [...document.querySelectorAll(".pdf-ink-popover .pdf-ink-menu-item")].map((b) => b.textContent.trim()));
