@@ -199,6 +199,23 @@ const files = {
 	})()`);
 	check("the stroke is smoothed through its samples", smooth.n > 11 && smooth.inside, JSON.stringify(smooth));
 
+	// Stylus mode off: a finger draws.
+	await click(".pdf-ink-stylus");
+	await page.waitForTimeout(100);
+	await touch("touchStart", [[x, y + 300]]);
+	for (let i = 1; i <= 8; i++) {
+		await touch("touchMove", [[x + i * 12, y + 300 + (i % 2) * 8]]);
+		await page.waitForTimeout(16);
+	}
+	await touch("touchEnd", []);
+	await page.waitForTimeout(400);
+	const fingerDrawn = await count();
+	check("with stylus mode off, a finger draws", fingerDrawn === 2 && (await page.evaluate(() => window.settings.palmRejection)) === false, `annotations ${fingerDrawn}`);
+	await api(`(() => { const a = ann.getAnnotations()[1]; ann.deleteAnnotation(a.object.pageIndex, a.object.id); })()`);
+	await page.waitForTimeout(200);
+	await click(".pdf-ink-stylus");
+	await page.waitForTimeout(100);
+
 	// Fingers: with the pen active a finger scrolls, two fingers pinch.
 	const s0 = await scrollTop();
 	await touch("touchStart", [[x, y + 300]]);

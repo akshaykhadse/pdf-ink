@@ -7,7 +7,7 @@ Built on [EmbedPDF](https://github.com/embedpdf/embed-pdf-viewer) (Apache-2.0), 
 ## Features
 
 - Pen in your own colours and widths (both editable in settings), freehand highlighter, text highlighter (select text to mark it), eraser, undo and redo. Strokes are smoothed through the pen's samples (can be switched off).
-- Palm rejection: while a pen tool is active, fingers scroll and pinch to zoom; only the stylus draws.
+- Stylus mode (toolbar button): fingers scroll and pinch to zoom while a pen tool is active; only the stylus draws. Switch it off to draw with fingers.
 - The pen's side button (S Pen, Surface Pen) arms the eraser for the next stroke.
 - Autosave into the PDF a few seconds after the last stroke, or save with Ctrl/Cmd+S.
 - Works on desktop and on Android and iOS tablets. No network access: fonts, the PDF engine and the viewer all ship in the plugin folder.

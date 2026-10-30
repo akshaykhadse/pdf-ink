@@ -83,6 +83,11 @@ export function Toolbar({ documentId, settings, eraser, setEraser, onSettingsCha
 		onSettingsChange();
 		pick("ink");
 	};
+	const stylus = (on: boolean) => {
+		settings.palmRejection = on;
+		onSettingsChange();
+		onToolChange();
+	};
 	const highlighter = (color: string) => {
 		settings.highlightColor = color;
 		onSettingsChange();
@@ -121,6 +126,10 @@ export function Toolbar({ documentId, settings, eraser, setEraser, onSettingsCha
 			<span class="pdf-ink-sep" />
 			<Button tip="Eraser (or press the pen's side button)" active={eraser} onClick={() => setEraser(!eraser)}>
 				<Icon name="eraser" />
+			</Button>
+			<span class="pdf-ink-sep" />
+			<Button tip="Stylus mode: fingers scroll and pinch, only the pen draws. Off: fingers draw too." cls="pdf-ink-stylus" active={settings.palmRejection} onClick={() => stylus(!settings.palmRejection)}>
+				<Icon name="pen-tool" />
 			</Button>
 			<span class="pdf-ink-sep" />
 			<Button tip="Undo" onClick={() => docHistory?.undo()}>

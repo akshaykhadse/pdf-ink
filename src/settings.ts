@@ -123,8 +123,8 @@ export class PdfInkSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Palm rejection")
-			.setDesc("While a pen tool is active, fingers scroll and pinch to zoom; only the stylus draws.")
+			.setName("Stylus mode")
+			.setDesc("Fingers scroll and pinch to zoom; only the stylus draws. Off: fingers draw too (a tablet without a pen). Also on the toolbar.")
 			.addToggle((t) =>
 				t.setValue(s.palmRejection).onChange(async (v) => {
 					s.palmRejection = v;

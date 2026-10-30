@@ -157,6 +157,9 @@ export class PointerGuard {
 	/** Re-checks what fingers must be kept from; call after the active tool changes. */
 	sync() {
 		this.root.classList.toggle("is-guarding", this.blockingFingers());
+		// Stylus mode off with a tool active: fingers draw, so pages must not pan natively.
+		const touchDraws = !this.o.settings().palmRejection && (this.eraserActive || this.activeTool() !== null);
+		this.root.classList.toggle("is-touch-draw", touchDraws);
 	}
 
 	private announce() {
@@ -226,8 +229,13 @@ export class PointerGuard {
 		}
 	}
 
+	/** In stylus mode fingers scroll; otherwise a touch is treated like a pen. */
+	private isFinger(e: PointerEvent): boolean {
+		return e.pointerType === "touch" && (this.o.settings().palmRejection || this.fingers.has(e.pointerId));
+	}
+
 	private forget(e: PointerEvent) {
-		if (e.pointerType === "touch") {
+		if (this.isFinger(e)) {
 			this.fingers.delete(e.pointerId);
 			this.blocked.delete(e.pointerId);
 			if (this.scroller?.id === e.pointerId) this.scroller = null;
@@ -242,7 +250,7 @@ export class PointerGuard {
 	// ------------------------------------------------------------------ events
 
 	private onDown(e: PointerEvent) {
-		if (e.pointerType === "touch") {
+		if (this.isFinger(e)) {
 			this.fingers.add(e.pointerId);
 			if (!this.blockingFingers()) return;
 			this.blocked.add(e.pointerId);
@@ -326,7 +334,7 @@ export class PointerGuard {
 
 	private onMove(e: PointerEvent) {
 		if (this.replaying) return;
-		if (e.pointerType === "touch") {
+		if (this.isFinger(e)) {
 			if (!this.blocked.has(e.pointerId)) return;
 			e.stopPropagation();
 			const s = this.scroller;
@@ -384,7 +392,7 @@ export class PointerGuard {
 	}
 
 	private onUp(e: PointerEvent) {
-		if (e.pointerType === "touch") {
+		if (this.isFinger(e)) {
 			const blocked = this.blocked.has(e.pointerId);
 			const s = this.scroller;
 			this.forget(e);
