@@ -145,6 +145,17 @@ function App(props: ViewerProps) {
 	);
 }
 
+/** A menu beside a selection: the wrapper EmbedPDF gives us covers the selection with pointer-events none, so the menu floats above or below it. */
+function Menu({ wrapperProps, placement, extraClass, children }: { wrapperProps: any; placement: any; extraClass?: string; children: any }) {
+	return (
+		<div {...wrapperProps} class="pdf-ink-menu-anchor">
+			<div class={"pdf-ink-menu pdf-ink-float " + (placement?.suggestTop === false ? "is-below" : "is-above") + (extraClass ? " " + extraClass : "")} onPointerDown={(e) => e.stopPropagation()}>
+				{children}
+			</div>
+		</div>
+	);
+}
+
 interface Flash {
 	pageIndex: number;
 	rect: PageRect | null;
@@ -244,7 +255,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 
 	const selectionScope = (): any => (registry?.getPlugin("selection") as any)?.provides()?.forDocument(documentId);
 
-	const selectionMenu = ({ menuWrapperProps, context, selected }: any) => {
+	const selectionMenu = ({ menuWrapperProps, context, selected, placement }: any) => {
 		if (!selected) return null;
 		const pageIndex: number = context.pageIndex;
 		const withSelection = async (fn: (rect: PageRect, segments: PageRect[], text: string) => Promise<void> | void) => {
@@ -274,8 +285,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 				});
 			});
 		return (
-			<div {...menuWrapperProps} class="pdf-ink-menu-anchor">
-				<div class="pdf-ink-menu" onPointerDown={(e) => e.stopPropagation()}>
+			<Menu wrapperProps={menuWrapperProps} placement={placement}>
 					{settings.textLinkFormats.map((f) => (
 						<button key={f.name} class="pdf-ink-menu-item" onClick={() => withSelection((rect, _s, text) => copyLink(pageIndex, rect, text, f.template, settings.textHighlight.color))}>
 							<Icon name="link" /> {f.name}
@@ -287,12 +297,11 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 					<button class="pdf-ink-menu-item" onClick={() => withSelection((_r, _s, text) => navigator.clipboard.writeText(text))}>
 						<Icon name="copy" /> Copy text
 					</button>
-				</div>
-			</div>
+			</Menu>
 		);
 	};
 
-	const annotationMenu = ({ menuWrapperProps, context, selected }: any) => {
+	const annotationMenu = ({ menuWrapperProps, context, selected, placement }: any) => {
 		if (!selected) return null;
 		const a = context.annotation?.object;
 		const pageIndex: number = context.pageIndex;
@@ -301,8 +310,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		const colors = isInk && a.intent !== "InkHighlight" ? settings.penColors : settings.highlightColors;
 		const recolor = (color: string) => ann?.updateAnnotation(pageIndex, a.id, { strokeColor: color, color });
 		return (
-			<div {...menuWrapperProps} class="pdf-ink-menu-anchor">
-				<div class="pdf-ink-menu" onPointerDown={(e) => e.stopPropagation()}>
+			<Menu wrapperProps={menuWrapperProps} placement={placement}>
 					{(isInk || isHighlight) &&
 						colors.map((c) => (
 							<button key={c} class={"pdf-ink-swatch" + (a.strokeColor?.toLowerCase() === c ? " is-active" : "")} aria-label={c} onClick={() => recolor(c)}>
@@ -317,22 +325,19 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 					<button class="pdf-ink-menu-item" aria-label="Delete" onClick={() => ann?.deleteAnnotation(pageIndex, a.id)}>
 						<Icon name="trash-2" />
 					</button>
-				</div>
-			</div>
+			</Menu>
 		);
 	};
 
-	const groupMenu = ({ menuWrapperProps, context, selected }: any) => {
+	const groupMenu = ({ menuWrapperProps, context, selected, placement }: any) => {
 		if (!selected) return null;
 		const items: any[] = context.annotations ?? [];
 		return (
-			<div {...menuWrapperProps} class="pdf-ink-menu-anchor">
-				<div class="pdf-ink-menu" onPointerDown={(e) => e.stopPropagation()}>
+			<Menu wrapperProps={menuWrapperProps} placement={placement}>
 					<button class="pdf-ink-menu-item" aria-label="Delete selected" onClick={() => tools.deleteMany(items.map((t) => ({ pageIndex: t.object.pageIndex, id: t.object.id })))}>
 						<Icon name="trash-2" /> Delete {items.length}
 					</button>
-				</div>
-			</div>
+			</Menu>
 		);
 	};
 

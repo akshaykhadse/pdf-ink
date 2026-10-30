@@ -180,7 +180,13 @@ const files = {
 	await drag(textX0, textY, textX1, textY, 8, 500);
 	const menuItems = await page.evaluate(() => [...document.querySelectorAll(".pdf-ink-menu .pdf-ink-menu-item")].map((b) => b.textContent.trim()));
 	check("selecting text shows the link menu", menuItems.includes("Link") && menuItems.includes("Highlight") && menuItems.includes("Copy text"), JSON.stringify(menuItems));
-	await page.evaluate(() => [...document.querySelectorAll(".pdf-ink-menu .pdf-ink-menu-item")].find((b) => b.textContent.trim() === "Link").click());
+	const linkBtn = await page.evaluate(() => {
+		const b = [...document.querySelectorAll(".pdf-ink-menu .pdf-ink-menu-item")].find((b) => b.textContent.trim() === "Link");
+		const r = b.getBoundingClientRect();
+		return { x: r.x + r.width / 2, y: r.y + r.height / 2, onTop: b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) };
+	});
+	check("the text selection menu is on top and clickable", linkBtn.onTop, JSON.stringify(linkBtn));
+	await page.mouse.click(linkBtn.x, linkBtn.y);
 	await page.waitForTimeout(400);
 	const clip = await page.evaluate(() => window.clipboard);
 	check("the link menu copies a PDF++-style rect link with the selected text", clip.length === 1 && /^\[\[sample\.pdf#page=1&rect=[\d.,]+\|Page 1 of 3\]\]$/.test(clip[0]), JSON.stringify(clip));
@@ -253,12 +259,20 @@ const files = {
 	check("a swatch in the annotation menu recolours it", recolored === "#1971c2", recolored);
 	await page.mouse.click(x - 200, y + 400);
 	await page.waitForTimeout(200);
+	const sel = [x - 20, y - 40, x + 320, y + 160];
 	await drag(x + 320, y - 40, x - 20, y + 160, 10, 400); // starts in empty space right of the text
 	const selN = await api(`ann.getSelectedAnnotations().length`);
 	check("pointer: dragging a box selects every stroke inside it", selN === 3, selN);
-	await page.evaluate(() => document.querySelector('.pdf-ink-menu [aria-label="Delete selected"]').click());
+	// A real mouse click: the menu must sit outside the selection box's handle layer.
+	const del = await page.evaluate((sel) => {
+		const b = document.querySelector('.pdf-ink-menu [aria-label="Delete selected"]');
+		const r = b.getBoundingClientRect();
+		const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+		return { x: r.x + r.width / 2, y: r.y + r.height / 2, onTop: b.contains(hit), outside: r.bottom <= sel[1] || r.top >= sel[3] };
+	}, sel);
+	await page.mouse.click(del.x, del.y);
 	await page.waitForTimeout(300);
-	check("the group menu deletes the selection", (await count()) === 0, await count());
+	check("the group menu is clickable and deletes the selection", del.onTop && (await count()) === 0, JSON.stringify(del) + ` left ${await count()}`);
 	await click('.pdf-ink-toolbar [aria-label="Undo"]');
 	await page.waitForTimeout(300);
 	check("undo restores the deleted strokes", (await count()) === 3, await count());
