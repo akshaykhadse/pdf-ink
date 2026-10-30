@@ -37,9 +37,19 @@ interface Stroke {
 
 /** PdfAnnotationSubtype.INK: the eraser only ever removes ink (never links, forms, notes). */
 const INK = 15;
+const HIGHLIGHT = 9;
 
 /** Whether an ink annotation is within `radius` page units of the point. */
 export function annotationHit(a: any, x: number, y: number, radius: number): boolean {
+	if (a?.type === HIGHLIGHT) {
+		// A text highlight: hit when the eraser touches one of its line boxes.
+		const boxes: any[] = Array.isArray(a.segmentRects) && a.segmentRects.length ? a.segmentRects : a.rect ? [a.rect] : [];
+		return boxes.some((b) => {
+			const o = b?.origin, sz = b?.size;
+			if (!o || !sz) return false;
+			return x >= o.x - radius && x <= o.x + sz.width + radius && y >= o.y - radius && y <= o.y + sz.height + radius;
+		});
+	}
 	if (a?.type !== INK) return false;
 	const inkList: Stroke[] | undefined = a?.inkList;
 	if (!Array.isArray(inkList)) return false;
@@ -94,6 +104,10 @@ export class PointerGuard {
 		};
 		on("pointerdown", (e) => this.onDown(e));
 		on("pointermove", (e) => this.onMove(e));
+		// A stale DOM text selection (left by selecting text to highlight it) would
+		// otherwise start a native drag on the next pen-down, which cancels the
+		// pointer and swallows the stroke.
+		root.addEventListener("dragstart", (e) => e.preventDefault(), true);
 		on("pointerup", (e) => this.onUp(e));
 		on("pointercancel", (e) => this.onUp(e));
 		on("pointerleave", (e) => {

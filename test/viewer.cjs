@@ -118,6 +118,37 @@ const files = {
 	await page.evaluate(() => (document.querySelector(".pdf-ink-viewport").scrollTop = 0));
 	await page.waitForTimeout(300);
 
+	// Text highlight: select text with the pointer while the text-highlight tool is on.
+	await click(".pdf-ink-text-highlight");
+	await page.waitForTimeout(100);
+	{
+		// "Page 1 of 3" sits at PDF (60, 760) in 24 pt Helvetica; y down from the top = 842 - 760.
+		const z = r0.width / 595;
+		const ty = r0.y + (842 - 766) * z, tx0 = r0.x + 55 * z, tx1 = r0.x + 200 * z;
+		await page.mouse.move(tx0, ty);
+		await page.mouse.down();
+		for (let i = 1; i <= 8; i++) await page.mouse.move(tx0 + ((tx1 - tx0) * i) / 8, ty);
+		await page.mouse.up();
+		await page.waitForTimeout(600);
+	}
+	const hl = await api(`ann.getAnnotations().map((a) => [a.object.type, a.object.color, a.object.segmentRects?.length])`);
+	check("selecting text with the text-highlight tool creates a highlight", hl.length === 1 && hl[0][0] === 9 && hl[0][2] >= 1, JSON.stringify(hl));
+	{
+		// The eraser removes it too.
+		await click(".pdf-ink-toolbar [aria-label^='Eraser']");
+		await page.waitForTimeout(50);
+		const z = r0.width / 595;
+		const ty = r0.y + (842 - 766) * z, tx = r0.x + 100 * z;
+		await page.mouse.move(tx, ty - 40);
+		await page.mouse.down();
+		for (let i = 1; i <= 8; i++) await page.mouse.move(tx, ty - 40 + i * 10);
+		await page.mouse.up();
+		await page.waitForTimeout(300);
+	}
+	const hlLeft = await count();
+	check("the eraser removes a text highlight", hlLeft === 0, String(hlLeft));
+	await click(".pdf-ink-toolbar [aria-label^='Eraser']");
+
 	// Pen: a toolbar swatch picks the ink tool in that colour, a stroke becomes an annotation.
 	const color = await page.evaluate(() => {
 		const b = document.querySelectorAll(".pdf-ink-toolbar .pdf-ink-swatch")[1];

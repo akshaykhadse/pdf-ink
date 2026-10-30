@@ -66,6 +66,7 @@ export function Toolbar({ documentId, settings, eraser, setEraser, onSettingsCha
 	const apply = () => {
 		annotationTools?.setToolDefaults("ink", { strokeColor: settings.penColor, color: settings.penColor, strokeWidth: settings.penWidth, opacity: 1 } as any);
 		annotationTools?.setToolDefaults("inkHighlighter", { strokeColor: settings.highlightColor, color: settings.highlightColor, strokeWidth: settings.highlightWidth } as any);
+		annotationTools?.setToolDefaults("highlight", { strokeColor: settings.highlightColor, color: settings.highlightColor } as any);
 	};
 	const pick = (toolId: string | null) => {
 		setEraser(false);
@@ -85,7 +86,8 @@ export function Toolbar({ documentId, settings, eraser, setEraser, onSettingsCha
 	const highlighter = (color: string) => {
 		settings.highlightColor = color;
 		onSettingsChange();
-		pick("inkHighlighter");
+		// A swatch keeps the current highlighter kind: freehand, or text selection.
+		pick(tool === "highlight" ? "highlight" : "inkHighlighter");
 	};
 	const docHistory = history?.forDocument(documentId);
 	const percent = Math.round((zoomState?.currentZoomLevel ?? 1) * 100);
@@ -109,10 +111,13 @@ export function Toolbar({ documentId, settings, eraser, setEraser, onSettingsCha
 			))}
 			<span class="pdf-ink-sep" />
 			{settings.highlightColors.map((color) => (
-				<Button key={color} tip={`Highlighter ${color}`} cls="pdf-ink-swatch pdf-ink-highlighter" active={tool === "inkHighlighter" && settings.highlightColor === color} onClick={() => highlighter(color)}>
+				<Button key={color} tip={`Highlighter ${color}`} cls="pdf-ink-swatch pdf-ink-highlighter" active={(tool === "inkHighlighter" || tool === "highlight") && settings.highlightColor === color} onClick={() => highlighter(color)}>
 					<span class="pdf-ink-dot" style={{ background: color }} />
 				</Button>
 			))}
+			<Button tip="Highlight text: select text to highlight it" cls="pdf-ink-text-highlight" active={tool === "highlight"} onClick={() => pick(tool === "highlight" ? "inkHighlighter" : "highlight")}>
+				<Icon name="text-select" />
+			</Button>
 			<span class="pdf-ink-sep" />
 			<Button tip="Eraser (or press the pen's side button)" active={eraser} onClick={() => setEraser(!eraser)}>
 				<Icon name="eraser" />

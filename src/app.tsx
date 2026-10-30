@@ -143,6 +143,8 @@ function toolDefaults(s: Settings) {
 		// save or close right after it never loses the stroke.
 		{ id: "ink", defaults: { strokeColor: s.penColor, color: s.penColor, strokeWidth: s.penWidth, opacity: 1 }, behavior: { commitDelay: 0 } },
 		{ id: "inkHighlighter", defaults: { strokeColor: s.highlightColor, color: s.highlightColor, strokeWidth: s.highlightWidth }, behavior: { commitDelay: 0 } },
+		// EmbedPDF's text-markup highlight: select text with the pen and it is highlighted.
+		{ id: "highlight", defaults: { strokeColor: s.highlightColor, color: s.highlightColor } },
 	] as any;
 }
 

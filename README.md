@@ -6,7 +6,7 @@ Built on [EmbedPDF](https://github.com/embedpdf/embed-pdf-viewer) (Apache-2.0), 
 
 ## Features
 
-- Pen in your own colours and widths (both editable in settings), ink highlighter, eraser, undo and redo. Strokes are smoothed through the pen's samples (can be switched off).
+- Pen in your own colours and widths (both editable in settings), freehand highlighter, text highlighter (select text to mark it), eraser, undo and redo. Strokes are smoothed through the pen's samples (can be switched off).
 - Palm rejection: while a pen tool is active, fingers scroll and pinch to zoom; only the stylus draws.
 - The pen's side button (S Pen, Surface Pen) arms the eraser for the next stroke.
 - Autosave into the PDF a few seconds after the last stroke, or save with Ctrl/Cmd+S.
