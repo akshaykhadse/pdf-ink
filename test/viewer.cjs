@@ -136,6 +136,10 @@ const files = {
 	const up = await ready();
 	console.log("opened in", Date.now() - t0, "ms");
 	check("the view opens a PDF and renders pages", ran === "ok" && up);
+	check("stylus mode is off by default", (await page.evaluate(() => window.settings.stylusMode)) === false && (await page.$(".pdf-ink-stylus.is-active")) === null);
+	// The rest of the checks assume stylus mode on; turn it on as the user would.
+	await page.click(".pdf-ink-stylus");
+	check("the stylus button turns stylus mode on", (await page.evaluate(() => window.settings.stylusMode)) === true);
 	const r0 = await pageRect(0);
 	check("the first page fits the leaf width", r0 && Math.abs(r0.width - (1200 - 24)) < 1 && r0.x >= 12, JSON.stringify(r0));
 	const z = r0.width / 595;

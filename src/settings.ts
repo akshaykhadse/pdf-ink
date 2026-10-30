@@ -63,7 +63,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	marker: { color: "#ffe066", width: 14, opacity: 0.5 },
 	textHighlight: { color: "#ffe066", width: 0, opacity: 1 },
 	eraserSize: 20,
-	stylusMode: true,
+	stylusMode: false,
 	smoothStrokes: true,
 	fullPenRate: true,
 	autosave: true,
@@ -174,7 +174,7 @@ export class PdfInkSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Autosave").setDesc("Write annotations into the PDF a moment after each change. Off: save with Ctrl/Cmd+S or when the PDF is closed.").addToggle((t) => t.setValue(s.autosave).onChange(async (v) => ((s.autosave = v), save())));
 
 		new Setting(containerEl).setName("Stylus").setHeading();
-		new Setting(containerEl).setName("Stylus mode on by default").setDesc("Fingers pan and scroll while only the pen draws. Can also be toggled on the toolbar.").addToggle((t) => t.setValue(s.stylusMode).onChange(async (v) => ((s.stylusMode = v), save())));
+		new Setting(containerEl).setName("Stylus mode on by default").setDesc("Off: fingers draw too. On: fingers pan and scroll while only the pen draws. Can also be toggled on the toolbar.").addToggle((t) => t.setValue(s.stylusMode).onChange(async (v) => ((s.stylusMode = v), save())));
 		new Setting(containerEl).setName("Smooth strokes").setDesc("Resample each stroke along a curve through the pen's samples (not native to EmbedPDF, which draws straight segments).").addToggle((t) => t.setValue(s.smoothStrokes).onChange(async (v) => ((s.smoothStrokes = v), save())));
 		new Setting(containerEl).setName("Use the pen's full sample rate").setDesc("Feed the browser's coalesced pointer samples to the stroke (not native to EmbedPDF).").addToggle((t) => t.setValue(s.fullPenRate).onChange(async (v) => ((s.fullPenRate = v), save())));
 		new Setting(containerEl).setName("Eraser size").setDesc("Diameter in pixels.").addSlider((sl) => sl.setLimits(6, 120, 2).setValue(s.eraserSize).setDynamicTooltip().onChange(async (v) => ((s.eraserSize = v), save())));

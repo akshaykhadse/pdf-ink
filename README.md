@@ -17,8 +17,12 @@ One tool is active at a time, picked on the floating toolbar:
 | Eraser | Remove the strokes and highlights the pointer crosses; a pen's side button while hovering erases one stroke | plugin addition |
 | Area link | Drag a box; copy it as a link or embed | native capture marquee, link formatting is a plugin addition |
 
-**Stylus mode** (toolbar button): fingers pan and scroll while only the pen
-draws. Off: a finger draws too, unless the hand or pointer tool is active.
+**Stylus mode** (toolbar button, off by default): fingers pan and scroll while
+only the pen draws. Off: a finger draws too, unless the hand or pointer tool is
+active.
+
+The toolbar is the pane's only bar: Obsidian's view header (back/forward
+arrows and the pane menu) is hidden for PDF Ink panes.
 
 **Full screen**: the PDF pane covers the Obsidian window, with only the
 toolbar left. `Esc` or the button leaves.

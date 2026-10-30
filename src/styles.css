@@ -5,6 +5,17 @@
 	overflow: hidden;
 }
 
+/* One bar: Obsidian's own view header (back/forward, pane menu) is hidden for
+   PDF Ink panes and the toolbar takes its place at the top of the pane. */
+.workspace-leaf-content[data-type="pdf-ink"] > .view-header {
+	display: none !important;
+}
+
+.workspace-leaf-content[data-type="pdf-ink"] > .view-content {
+	height: 100% !important;
+	padding: 0 !important;
+}
+
 .pdf-ink-root {
 	position: relative;
 	width: 100%;
@@ -254,7 +265,7 @@
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	padding: 4px 8px 0;
+	padding: 3px 8px 0;
 	background: transparent;
 }
 
