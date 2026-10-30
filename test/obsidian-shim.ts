@@ -67,6 +67,14 @@ export class FileView {
 		this.contentEl = document.getElementById("content")!;
 	}
 	registerEvent() {}
+	// Obsidian's View owns open()/close() and calls onOpen()/onClose() from them;
+	// a plugin view must not define methods with these names.
+	async open(_parentEl: HTMLElement) {
+		await this.onOpen();
+	}
+	async close() {
+		await this.onClose();
+	}
 	async onOpen() {}
 	async onClose() {}
 }

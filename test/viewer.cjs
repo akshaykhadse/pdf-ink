@@ -159,7 +159,7 @@ const files = {
 	await page.waitForTimeout(800);
 
 	// Save: the written PDF carries the ink annotation and loads back with it.
-	const ok = await page.evaluate(() => window.view.save(true));
+	const ok = await page.evaluate(() => window.view.saveNow(true));
 	const saved = await page.evaluate(() => {
 		const last = window.saved[window.saved.length - 1];
 		const txt = last ? new TextDecoder("latin1").decode(last) : "";
@@ -253,7 +253,7 @@ const files = {
 	await page.mouse.down();
 	for (let i = 1; i <= 10; i++) await page.mouse.move(x + i * 8, y + 200 + (i % 2) * 10);
 	await page.mouse.up();
-	await page.evaluate(() => window.view.onClose());
+	await page.evaluate(() => window.view.close());
 	const closedSave = await page.evaluate(() => {
 		const last = window.saved[window.saved.length - 1];
 		const txt = last ? new TextDecoder("latin1").decode(last) : "";

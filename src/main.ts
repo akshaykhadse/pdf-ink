@@ -33,7 +33,7 @@ export default class PdfInkPlugin extends Plugin {
 			checkCallback: (checking) => {
 				const view = this.app.workspace.getActiveViewOfType(PdfInkView);
 				if (!view) return false;
-				if (!checking) void view.save(true);
+				if (!checking) void view.saveNow(true);
 				return true;
 			},
 		});

@@ -24,10 +24,10 @@ export class PdfInkView extends FileView {
 		super(leaf);
 		this.scope = new Scope(this.app.scope);
 		this.scope.register(["Mod"], "s", () => {
-			void this.save(true);
+			void this.saveNow(true);
 			return false;
 		});
-		this.requestAutosave = debounce(() => void this.save(false), AUTOSAVE_QUIET_MS, true);
+		this.requestAutosave = debounce(() => void this.saveNow(false), AUTOSAVE_QUIET_MS, true);
 	}
 
 	getViewType() {
@@ -56,7 +56,7 @@ export class PdfInkView extends FileView {
 				if (file !== this.file || !(file instanceof TFile)) return;
 				if (Date.now() < this.ignoreModifyUntil || this.saving) return;
 				// Changed elsewhere (sync, another device): show the file as it is now.
-				if (!this.dirty) void this.open(file);
+				if (!this.dirty) void this.loadPdf(file);
 				else new Notice(`${file.name} changed elsewhere; your unsaved strokes will be written over that version.`, 8000);
 			})
 		);
@@ -64,17 +64,17 @@ export class PdfInkView extends FileView {
 
 	async onClose() {
 		await this.flush();
-		this.close();
+		this.unmountViewer();
 		await super.onClose();
 	}
 
 	async onLoadFile(file: TFile) {
-		await this.open(file);
+		await this.loadPdf(file);
 	}
 
 	async onUnloadFile() {
 		await this.flush();
-		this.close();
+		this.unmountViewer();
 	}
 
 	/** Saves pending changes, if any. */
@@ -82,7 +82,7 @@ export class PdfInkView extends FileView {
 		// A stroke becomes an annotation a moment after the pen lifts.
 		await new Promise((r) => setTimeout(r, 80));
 		while (this.saving) await this.saving;
-		if (this.dirty) await this.save(false, true);
+		if (this.dirty) await this.saveNow(false, true);
 	}
 
 	/** Settings changed in the settings tab: push them into the open viewer. */
@@ -91,7 +91,7 @@ export class PdfInkView extends FileView {
 		this.refresh?.();
 	}
 
-	private close() {
+	private unmountViewer() {
 		this.openToken++;
 		this.unmount?.();
 		this.unmount = null;
@@ -100,9 +100,9 @@ export class PdfInkView extends FileView {
 		this.dirty = false;
 	}
 
-	private async open(file: TFile) {
+	private async loadPdf(file: TFile) {
 		const token = ++this.openToken;
-		this.close();
+		this.unmountViewer();
 		this.openToken = token;
 		this.rootEl.empty();
 		this.rootEl.addClass("is-loading");
@@ -140,7 +140,7 @@ export class PdfInkView extends FileView {
 	}
 
 	/** Writes the PDF with its annotations back to the vault. */
-	async save(manual: boolean, closing = false): Promise<boolean> {
+	async saveNow(manual: boolean, closing = false): Promise<boolean> {
 		while (this.saving) await this.saving;
 		const file = this.file;
 		const handle = this.handle;

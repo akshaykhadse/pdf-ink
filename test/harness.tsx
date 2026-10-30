@@ -46,7 +46,7 @@ window.run = async (pdfUrl = "/sample.pdf") => {
 	const leaf: any = { app };
 	const view = new PdfInkView(leaf, plugin as any);
 	(view as any).file = file;
-	await view.onOpen();
+	await (view as any).open(document.getElementById("content"));
 	await view.onLoadFile(file as any);
 	window.view = view;
 	window.file = file;
