@@ -31,9 +31,9 @@ const DRAW_TOOLS: ToolDef[] = [
 	{ id: "areaLink", icon: "scan", label: "Area link" },
 ];
 
-/** Dot diameter on the toolbar for a stroke width in PDF points. */
+/** Thickness of the colour bar that stands for a stroke width in PDF points. */
 export function dotSize(width: number): number {
-	return Math.round(Math.min(22, Math.max(4, 4 + 4.5 * Math.sqrt(width))));
+	return Math.round(Math.min(10, Math.max(2, 1 + 2 * Math.sqrt(width))));
 }
 
 interface Props {
@@ -183,7 +183,7 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 				{styled && (
 					<div class="pdf-ink-group">
 						<button class={"pdf-ink-btn pdf-ink-style" + (popover === "options" ? " is-open" : "")} aria-label="Tool options" onClick={() => setPopover(popover === "options" ? null : "options")}>
-							<span class="pdf-ink-dot" style={{ background: tools.style()?.color, width: dotSize(tools.style()?.width || 3), height: dotSize(tools.style()?.width || 3), opacity: tools.style()?.opacity }} />
+							<span class="pdf-ink-bar" style={{ background: tools.style()?.color, height: dotSize(tools.style()?.width || 3), opacity: tools.style()?.opacity }} />
 						</button>
 					</div>
 				)}
@@ -260,7 +260,7 @@ function ToolOptions({ tools, settings }: { tools: ToolController; settings: Set
 				<div class="pdf-ink-group pdf-ink-widths">
 					{widths.map((w) => (
 						<button key={w} class={"pdf-ink-swatch" + (style.width === w ? " is-active" : "")} aria-label={`Width ${w}`} onClick={() => tools.setStyle(tool, { width: w })}>
-							<span class="pdf-ink-dot" style={{ width: dotSize(w), height: dotSize(w), background: style.color }} />
+							<span class="pdf-ink-bar" style={{ height: dotSize(w), background: style.color }} />
 						</button>
 					))}
 				</div>

@@ -46,6 +46,6 @@ check("annotationHit finds a highlight box", annotationHit(hl, 11, 2, 2) && !ann
 check("annotationHit ignores other types", !annotationHit({ type: 1, rect: { origin: { x: 0, y: 0 }, size: { width: 9, height: 9 } } }, 1, 1, 5));
 
 // toolbar
-check("dotSize grows with width and stays within bounds", dotSize(0.25) >= 4 && dotSize(1) < dotSize(4) && dotSize(40) <= 22);
+check("dotSize grows with width and stays within bounds", dotSize(0.25) >= 2 && dotSize(1) < dotSize(4) && dotSize(40) <= 10);
 
 if (failed) process.exit(1);
