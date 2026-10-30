@@ -481,8 +481,8 @@ body.pdf-ink-fullscreen-active .workspace-leaf-content.pdf-ink-fullscreen {
 	inset: 0 !important;
 	width: 100vw !important;
 	height: 100vh !important;
-	padding-top: env(safe-area-inset-top);
-	padding-bottom: env(safe-area-inset-bottom);
+	padding-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px), var(--pdf-ink-safe-top, 0px));
+	padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
 	box-sizing: border-box;
 	z-index: 9999 !important;
 	background: var(--background-secondary);

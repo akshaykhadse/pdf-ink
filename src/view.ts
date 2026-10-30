@@ -133,6 +133,7 @@ export class PdfInkView extends FileView {
 	setFullscreen(on: boolean) {
 		if (this.fullscreen === on) return;
 		this.fullscreen = on;
+		if (on) this.containerEl.style.setProperty("--pdf-ink-safe-top", `${this.statusBarInset()}px`);
 		this.containerEl.toggleClass("pdf-ink-fullscreen", on);
 		const body = this.containerEl.ownerDocument.body; // the pane may live in a pop-out window
 		body.toggleClass("pdf-ink-fullscreen-active", on);
@@ -140,6 +141,19 @@ export class PdfInkView extends FileView {
 		this.handle?.tools.notify();
 		if (on) this.app.workspace.setActiveLeaf(this.leaf, { focus: true });
 		(this.containerEl.ownerDocument.defaultView ?? window).dispatchEvent(new Event("resize"));
+	}
+
+	/**
+	 * Android draws the status bar over the web view and reports no
+	 * env(safe-area-inset-top); Obsidian keeps its own UI below the bar, so
+	 * the main container's top edge is the inset. Measured before the pane
+	 * goes fixed.
+	 */
+	private statusBarInset(): number {
+		const doc = this.containerEl.ownerDocument;
+		if (!doc.body.classList.contains("is-mobile")) return 0;
+		const main = doc.querySelector(".horizontal-main-container") ?? doc.querySelector(".app-container");
+		return Math.max(0, Math.round(main?.getBoundingClientRect().top ?? 0));
 	}
 
 	// ----------------------------------------------------------------- loading
