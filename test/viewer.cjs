@@ -163,6 +163,12 @@ const files = {
 	const n1 = await count();
 	const dirty1 = await page.evaluate(() => window.view.dirty);
 	check("a pen stroke becomes an ink annotation and marks the file dirty", n1 === 1 && dirty1 === true, `${n1}, dirty ${dirty1}`);
+	// A second stroke that starts on the first one draws instead of selecting it.
+	await stroke(x + 4, y + 2);
+	const over = await api(`[ann.getAnnotations().length, ann.getSelectedAnnotation()?.object?.id ?? null]`);
+	check("a stroke starting on an earlier stroke draws rather than selecting it", over[0] === 2 && over[1] === null, JSON.stringify(over));
+	await api(`(() => { const a = ann.getAnnotations()[1]; ann.deleteAnnotation(a.object.pageIndex, a.object.id); })()`);
+	await page.waitForTimeout(200);
 	// The 11 pointer samples of that zigzag are resampled along a spline through them.
 	const smooth = await api(`(() => {
 		const o = ann.getAnnotations()[0].object;

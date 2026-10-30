@@ -141,8 +141,10 @@ function toolDefaults(s: Settings) {
 	return [
 		// commitDelay 0: a stroke is an annotation as soon as the pen lifts, so a
 		// save or close right after it never loses the stroke.
-		{ id: "ink", defaults: { strokeColor: s.penColor, color: s.penColor, strokeWidth: s.penWidth, opacity: 1 }, behavior: { commitDelay: 0 } },
-		{ id: "inkHighlighter", defaults: { strokeColor: s.highlightColor, color: s.highlightColor, strokeWidth: s.highlightWidth }, behavior: { commitDelay: 0 } },
+		// exclusive: while drawing, existing annotations are not clickable, so a
+		// stroke that starts on top of an earlier one draws instead of selecting it.
+		{ id: "ink", defaults: { strokeColor: s.penColor, color: s.penColor, strokeWidth: s.penWidth, opacity: 1 }, behavior: { commitDelay: 0 }, interaction: { exclusive: true } },
+		{ id: "inkHighlighter", defaults: { strokeColor: s.highlightColor, color: s.highlightColor, strokeWidth: s.highlightWidth }, behavior: { commitDelay: 0 }, interaction: { exclusive: true } },
 		// EmbedPDF's text-markup highlight: select text with the pen and it is highlighted.
 		{ id: "highlight", defaults: { strokeColor: s.highlightColor, color: s.highlightColor } },
 	] as any;
