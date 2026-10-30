@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs production",
-    "test": "node scripts/build.mjs test && node test/viewer.cjs"
+    "test": "node scripts/build.mjs test && node test/unit.cjs && node test/viewer.cjs"
   },
   "author": "Akshay Khadse",
   "license": "MIT",

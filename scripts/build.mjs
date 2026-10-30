@@ -34,6 +34,7 @@ console.log("styles.css and pdfium.wasm written");
 
 if (mode === "test") {
 	mkdirSync("test/out", { recursive: true });
+	await esbuild.build({ ...common, entryPoints: ["src/ink.ts"], outfile: "test/out/ink.cjs" });
 	await esbuild.build({
 		...common,
 		entryPoints: ["test/harness.tsx"],

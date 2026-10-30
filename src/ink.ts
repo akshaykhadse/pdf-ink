@@ -95,9 +95,46 @@ export function smoothInkAnnotation<T extends { type?: number; inkList?: { point
 	return { ...annotation, inkList, rect };
 }
 
+interface Rect {
+	origin: { x: number; y: number };
+	size: { width: number; height: number };
+}
+
+const HIGHLIGHT = 9;
+
+/**
+ * EmbedPDF builds a text highlight from the glyphs' full font boxes, which
+ * are often taller than the line spacing, so the boxes of neighbouring lines
+ * overlap and the overlap shows darker. Where two boxes share columns and
+ * overlap vertically, the boundary moves to the middle of the overlap.
+ */
+export function tidyHighlightRects(rects: Rect[]): Rect[] {
+	const out = rects
+		.filter((r) => r?.origin && r?.size && r.size.width > 0 && r.size.height > 0)
+		.map((r) => ({ top: r.origin.y, bottom: r.origin.y + r.size.height, left: r.origin.x, right: r.origin.x + r.size.width }))
+		.sort((a, b) => a.top - b.top || a.left - b.left);
+	for (let i = 0; i < out.length; i++) {
+		for (let j = i + 1; j < out.length; j++) {
+			const a = out[i], b = out[j];
+			if (b.top >= a.bottom) break;
+			if (b.right <= a.left || b.left >= a.right) continue;
+			if (b.bottom <= a.bottom && b.top >= a.top) continue; // nested: leave it
+			const mid = (b.top + a.bottom) / 2;
+			a.bottom = Math.max(a.top, mid);
+			b.top = Math.min(b.bottom, mid);
+		}
+	}
+	return out.map((r) => ({ origin: { x: r.left, y: r.top }, size: { width: r.right - r.left, height: r.bottom - r.top } }));
+}
+
+function tidyHighlightAnnotation<T extends { type?: number; segmentRects?: Rect[]; rect?: Rect }>(annotation: T): T {
+	if (annotation.type !== HIGHLIGHT || !Array.isArray(annotation.segmentRects) || annotation.segmentRects.length < 2) return annotation;
+	return { ...annotation, segmentRects: tidyHighlightRects(annotation.segmentRects) };
+}
+
 /**
  * Patches EmbedPDF's annotation plugin so every ink annotation it creates is
- * smoothed first. Done on the plugin instance (not the per-document scope)
+ * smoothed first and text highlights get non-overlapping line boxes. Done on the plugin instance (not the per-document scope)
  * so it runs before the history entry is recorded.
  */
 export function installInkSmoothing(annotationPlugin: any, enabled: () => boolean): void {
@@ -111,6 +148,7 @@ export function installInkSmoothing(annotationPlugin: any, enabled: () => boolea
 	annotationPlugin.__pdfInkSmoothing = enabled;
 	annotationPlugin.createAnnotation = function (pageIndex: number, annotation: any, ...rest: unknown[]) {
 		const on = annotationPlugin.__pdfInkSmoothing;
-		return original.call(this, pageIndex, on() ? smoothInkAnnotation(annotation) : annotation, ...rest);
+		const fixed = tidyHighlightAnnotation(on() ? smoothInkAnnotation(annotation) : annotation);
+		return original.call(this, pageIndex, fixed, ...rest);
 	};
 }
