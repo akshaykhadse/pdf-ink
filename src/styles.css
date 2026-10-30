@@ -464,8 +464,17 @@ body.pdf-ink-fullscreen-active .workspace-leaf-content.pdf-ink-fullscreen {
 	padding-top: env(safe-area-inset-top);
 	padding-bottom: env(safe-area-inset-bottom);
 	box-sizing: border-box;
-	z-index: var(--layer-modal, 50) !important;
+	z-index: 9999 !important;
 	background: var(--background-secondary);
+}
+
+/* Tab headers, the title bar and the sidebar toggles sit in their own stacking layers above the pane: hide them. */
+body.pdf-ink-fullscreen-active .workspace-tab-header-container,
+body.pdf-ink-fullscreen-active .titlebar,
+body.pdf-ink-fullscreen-active .sidebar-toggle-button,
+body.pdf-ink-fullscreen-active .workspace-drawer-header,
+body.pdf-ink-fullscreen-active .view-header {
+	display: none !important;
 }
 
 /* An ancestor with contain/transform would trap the fixed pane inside its own leaf. */
