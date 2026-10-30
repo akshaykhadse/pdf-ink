@@ -285,6 +285,15 @@ const files = {
 	await page.waitForTimeout(300);
 	check("undo restores the deleted strokes", (await count()) === 3, await count());
 
+	// --- hand tool over strokes: a drag pans and selects nothing
+	await tool("hand");
+	await api(`ann.deselectAnnotation()`);
+	await setScroll(100);
+	await drag(x + 40, y + 5, x + 40, y - 200, 10, 300);
+	const handSel = await api(`ann.getSelectedAnnotations().length`);
+	check("hand: dragging on a stroke pans and does not select it", handSel === 0 && (await scrollTop()) > 200, `selected ${handSel}, scrollTop ${await scrollTop()}`);
+	await setScroll(0);
+
 	// --- marker and text highlighter
 	await tool("marker");
 	await stroke(x, y + 220);

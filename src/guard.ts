@@ -134,6 +134,8 @@ export class PointerGuard {
 		this.root.classList.toggle("is-guarding", this.blockingFingers());
 		// Stylus mode off with a drawing tool: fingers draw, so pages must not scroll natively.
 		this.root.classList.toggle("is-touch-draw", !this.tools.stylusMode && this.tools.drawing);
+		// Hand tool: nothing on the page is clickable, so a drag over a stroke pans instead of selecting it.
+		this.root.classList.toggle("is-hand", this.tools.tool === "hand");
 		if (!this.eraserActive()) this.cursor.hidden = true;
 	}
 

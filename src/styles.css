@@ -71,6 +71,11 @@
 	touch-action: none;
 }
 
+/* Hand tool: EmbedPDF's pan mode leaves annotations clickable; a drag must pan, not select. */
+.pdf-ink.is-hand .pdf-ink-page-layers * {
+	pointer-events: none !important;
+}
+
 /* Stylus mode off with a drawing tool: fingers draw, pages must not pan. */
 .pdf-ink.is-touch-draw .pdf-ink-page-layers {
 	touch-action: none !important;
