@@ -243,6 +243,7 @@ export class PointerGuard {
 	 */
 	private replayCoalesced(e: PointerEvent) {
 		if (this.replaying || !e.isTrusted || typeof e.getCoalescedEvents !== "function") return;
+		if (!this.o.settings().fullPenRate) return;
 		if (this.activeTool() === null || !(e.target instanceof Element)) return;
 		const events = e.getCoalescedEvents();
 		if (events.length < 2) return;

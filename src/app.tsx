@@ -93,7 +93,7 @@ function App(props: ViewerProps & { version: number }) {
 			const opened: { documentId: string; task: any } = await settle(documents.openDocumentBuffer({ buffer: props.bytes, name: props.name }));
 			await settle(opened.task);
 			const documentId = opened.documentId;
-			installInkSmoothing(registry.getPlugin("annotation"));
+			installInkSmoothing(registry.getPlugin("annotation"), () => props.settings.smoothStrokes);
 			const annotations: any = (registry.getPlugin("annotation") as any)?.provides();
 			const scoped = annotations?.forDocument(documentId);
 			scoped?.onAnnotationEvent?.((event: { type: string }) => {

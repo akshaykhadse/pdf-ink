@@ -100,12 +100,17 @@ export function smoothInkAnnotation<T extends { type?: number; inkList?: { point
  * smoothed first. Done on the plugin instance (not the per-document scope)
  * so it runs before the history entry is recorded.
  */
-export function installInkSmoothing(annotationPlugin: any): void {
-	if (!annotationPlugin || annotationPlugin.__pdfInkSmoothing) return;
+export function installInkSmoothing(annotationPlugin: any, enabled: () => boolean): void {
+	if (!annotationPlugin) return;
+	if (annotationPlugin.__pdfInkSmoothing) {
+		annotationPlugin.__pdfInkSmoothing = enabled;
+		return;
+	}
 	const original = annotationPlugin.createAnnotation;
 	if (typeof original !== "function") return;
-	annotationPlugin.__pdfInkSmoothing = true;
+	annotationPlugin.__pdfInkSmoothing = enabled;
 	annotationPlugin.createAnnotation = function (pageIndex: number, annotation: any, ...rest: unknown[]) {
-		return original.call(this, pageIndex, smoothInkAnnotation(annotation), ...rest);
+		const on = annotationPlugin.__pdfInkSmoothing;
+		return original.call(this, pageIndex, on() ? smoothInkAnnotation(annotation) : annotation, ...rest);
 	};
 }

@@ -4,7 +4,7 @@ import { useAnnotation, useAnnotationCapability } from "@embedpdf/plugin-annotat
 import { ZoomMode, useZoom } from "@embedpdf/plugin-zoom/preact";
 import { useHistoryCapability } from "@embedpdf/plugin-history/preact";
 import { useScroll } from "@embedpdf/plugin-scroll/preact";
-import { PEN_WIDTHS, type Settings } from "./settings";
+import type { Settings } from "./settings";
 
 interface ToolbarProps {
 	documentId: string;
@@ -14,6 +14,11 @@ interface ToolbarProps {
 	onSettingsChange(): void;
 	/** The active EmbedPDF tool changed (the pointer guard re-checks what to block). */
 	onToolChange(): void;
+}
+
+/** Toolbar dot diameter for a pen width: 4 px for the finest up to 22 px. */
+function dotSize(width: number): number {
+	return Math.round(Math.min(22, Math.max(4, 4 + 4.5 * Math.sqrt(width))));
 }
 
 /** An Obsidian (Lucide) icon. */
@@ -97,9 +102,9 @@ export function Toolbar({ documentId, settings, eraser, setEraser, onSettingsCha
 				</Button>
 			))}
 			<span class="pdf-ink-sep" />
-			{PEN_WIDTHS.map((w) => (
-				<Button key={w.width} tip={`${w.name} pen`} cls="pdf-ink-width" active={tool === "ink" && settings.penWidth === w.width} onClick={() => width(w.width)}>
-					<span class="pdf-ink-dot" style={{ width: 6 + w.width * 3, height: 6 + w.width * 3 }} />
+			{settings.penWidths.map((w) => (
+				<Button key={w} tip={`Pen width ${w} pt`} cls="pdf-ink-width" active={tool === "ink" && settings.penWidth === w} onClick={() => width(w)}>
+					<span class="pdf-ink-dot" style={{ width: dotSize(w), height: dotSize(w) }} />
 				</Button>
 			))}
 			<span class="pdf-ink-sep" />
