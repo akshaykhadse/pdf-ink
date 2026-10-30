@@ -133,7 +133,7 @@ export class PointerGuard {
 	sync() {
 		this.root.classList.toggle("is-guarding", this.blockingFingers());
 		// Stylus mode off with a drawing tool: fingers draw, so pages must not scroll natively.
-		this.root.classList.toggle("is-touch-draw", !this.tools.stylusMode && this.tools.drawing);
+		this.root.classList.toggle("is-touch-draw", !this.tools.stylusMode && this.tools.penOnly);
 		// Hand tool: nothing on the page is clickable, so a drag over a stroke pans instead of selecting it.
 		this.root.classList.toggle("is-hand", this.tools.tool === "hand");
 		if (!this.eraserActive()) this.cursor.hidden = true;
@@ -146,7 +146,7 @@ export class PointerGuard {
 	}
 
 	private blockingFingers(): boolean {
-		return this.tools.stylusMode && (this.tools.drawing || this.pens.size > 0);
+		return this.tools.stylusMode && (this.tools.penOnly || this.pens.size > 0);
 	}
 
 	/** The scrolling viewport under a point, or null over the toolbar. */
@@ -170,6 +170,11 @@ export class PointerGuard {
 	}
 
 	private blockPenTouch(e: TouchEvent) {
+		// Stylus mode off with the pointer tool: fingers select, so two fingers must not pinch either.
+		if (!this.tools.stylusMode && this.tools.tool === "pointer" && e.touches.length > 1 && this.root.contains(e.target as Node)) {
+			e.stopImmediatePropagation();
+			return;
+		}
 		const pen = this.penAt;
 		if (!pen || e.touches.length > 1) return;
 		for (let i = 0; i < e.changedTouches.length; i++) {

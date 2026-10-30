@@ -109,6 +109,11 @@ export class ToolController {
 		return DRAWING_TOOLS.has(this._tool);
 	}
 
+	/** Tools where, in stylus mode, fingers scroll instead of acting on the page: drawing tools and the pointer. */
+	get penOnly(): boolean {
+		return this.drawing || this._tool === "pointer";
+	}
+
 	setPenEraser(on: boolean) {
 		if (this.penEraser === on) return;
 		this.penEraser = on;

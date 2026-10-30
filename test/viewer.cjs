@@ -285,6 +285,30 @@ const files = {
 	await page.waitForTimeout(300);
 	check("undo restores the deleted strokes", (await count()) === 3, await count());
 
+	// --- pointer tool and stylus mode: fingers scroll when it is on, select when it is off
+	await tool("pointer");
+	await api(`ann.deselectAnnotation()`);
+	await setScroll(300);
+	await fingerSwipe(x + 320, y - 40, -340, 200); // a downward swipe scrolls back up
+	check("pointer + stylus mode on: a finger scrolls and selects nothing", (await scrollTop()) < 200 && (await api(`ann.getSelectedAnnotations().length`)) === 0, `scrollTop ${await scrollTop()}, selected ${await api(`ann.getSelectedAnnotations().length`)}`);
+	await setScroll(0);
+	await click(".pdf-ink-stylus");
+	await page.waitForTimeout(100);
+	await fingerSwipe(x + 320, y - 40 + 300, -340, -200);
+	check("pointer + stylus mode off: a finger box-selects and does not scroll", (await scrollTop()) === 0 && (await api(`ann.getSelectedAnnotations().length`)) >= 1, `scrollTop ${await scrollTop()}, selected ${await api(`ann.getSelectedAnnotations().length`)}`);
+	const zp = await api(`zoom.getState().currentZoomLevel`);
+	await touch("touchStart", [[x - 50, y + 300], [x + 50, y + 300]]);
+	for (let i = 1; i <= 8; i++) {
+		await touch("touchMove", [[x - 50 - i * 10, y + 300], [x + 50 + i * 10, y + 300]]);
+		await page.waitForTimeout(16);
+	}
+	await touch("touchEnd", []);
+	await page.waitForTimeout(500);
+	check("pointer + stylus mode off: two fingers do not pinch", Math.abs((await api(`zoom.getState().currentZoomLevel`)) - zp) < 0.01);
+	await click(".pdf-ink-stylus");
+	await page.waitForTimeout(100);
+	await api(`ann.deselectAnnotation()`);
+
 	// --- hand tool over strokes: a drag pans and selects nothing
 	await tool("hand");
 	await api(`ann.deselectAnnotation()`);
