@@ -1,0 +1,490 @@
+/* PDF Ink */
+
+.pdf-ink-content {
+	padding: 0;
+	overflow: hidden;
+}
+
+.pdf-ink-root {
+	position: relative;
+	width: 100%;
+	height: 100%;
+}
+
+.pdf-ink {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+}
+
+.pdf-ink-global {
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.pdf-ink-root.is-loading::after {
+	content: "Opening…";
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+/* ------------------------------------------------------------------ pages */
+
+.pdf-ink-viewport {
+	box-sizing: border-box;
+	background: var(--background-secondary);
+}
+
+.pdf-ink-page {
+	position: relative;
+	background: #fff;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.pdf-ink-page img {
+	-webkit-user-drag: none;
+}
+
+.pdf-ink-page-layers {
+	position: absolute;
+	inset: 0;
+}
+
+.pdf-ink-base,
+.pdf-ink-tiles {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+/* Stylus mode with a drawing tool: fingers are handled by the guard, so nothing scrolls natively. */
+.pdf-ink.is-guarding .pdf-ink-viewport {
+	touch-action: none;
+}
+
+/* Stylus mode off with a drawing tool: fingers draw, pages must not pan. */
+.pdf-ink.is-touch-draw .pdf-ink-page-layers {
+	touch-action: none !important;
+}
+
+.pdf-ink-eraser-cursor {
+	position: absolute;
+	z-index: 20;
+	pointer-events: none;
+	border-radius: 50%;
+	border: 1.5px solid var(--text-normal);
+	background: rgba(255, 255, 255, 0.5);
+	background: color-mix(in srgb, var(--background-primary) 55%, transparent);
+	box-sizing: border-box;
+}
+
+.pdf-ink-marquee {
+	border: 1.5px dashed var(--interactive-accent);
+	background: rgba(0, 122, 204, 0.12);
+	background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+
+/* ------------------------------------------------------------- overlays */
+
+.pdf-ink-backlinks {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	z-index: 1;
+}
+
+.pdf-ink-backlink {
+	position: absolute;
+	pointer-events: none;
+	box-sizing: border-box;
+	padding: 0;
+	margin: 0;
+	border: 1.5px solid;
+	border-radius: 3px;
+	background: color-mix(in srgb, currentColor 8%, transparent);
+	cursor: pointer;
+	box-shadow: none;
+	opacity: 0.8;
+}
+
+.pdf-ink-backlinks.is-clickable .pdf-ink-backlink {
+	pointer-events: auto;
+}
+
+.pdf-ink-backlink:hover {
+	opacity: 1;
+	background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.pdf-ink-flash {
+	position: absolute;
+	z-index: 4;
+	pointer-events: none;
+	border-radius: 3px;
+	background: var(--interactive-accent);
+	animation: pdf-ink-flash 2.2s ease-out forwards;
+}
+
+@keyframes pdf-ink-flash {
+	0% {
+		opacity: 0.45;
+	}
+	100% {
+		opacity: 0;
+	}
+}
+
+.pdf-ink-area {
+	position: absolute;
+	z-index: 12;
+	box-sizing: border-box;
+	border: 1.5px solid var(--interactive-accent);
+	background: rgba(0, 122, 204, 0.1);
+	background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+	border-radius: 3px;
+}
+
+.pdf-ink-area-menu {
+	position: absolute;
+	left: 0;
+	top: 100%;
+	margin-top: 6px;
+}
+
+/* ------------------------------------------------------------------ menus */
+
+.pdf-ink-menu-anchor {
+	z-index: 30 !important;
+}
+
+/* The anchor covers the selection with pointer-events none; the menu floats outside it. */
+.pdf-ink-float {
+	position: absolute;
+	left: 0;
+	pointer-events: auto;
+	z-index: 1;
+}
+
+.pdf-ink-float.is-above {
+	bottom: 100%;
+	margin-bottom: 6px;
+}
+
+.pdf-ink-float.is-below {
+	top: 100%;
+	margin-top: 6px;
+}
+
+.pdf-ink-menu {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px;
+	padding: 4px;
+	border-radius: var(--radius-m, 8px);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.2));
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	white-space: nowrap;
+}
+
+.pdf-ink-menu-row {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	width: 100%;
+}
+
+.pdf-ink-menu-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 30px;
+	padding: 0 8px !important;
+	margin: 0;
+	border: 0;
+	border-radius: var(--radius-s, 4px);
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	cursor: pointer;
+}
+
+.pdf-ink-menu-item:hover:not(:disabled) {
+	background: var(--background-modifier-hover);
+}
+
+.pdf-ink-menu-item:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.pdf-ink-popover.pdf-ink-menu {
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.pdf-ink-popover.pdf-ink-menu .pdf-ink-menu-item {
+	justify-content: flex-start;
+}
+
+/* ---------------------------------------------------------------- toolbar */
+
+.pdf-ink-toolbar-host {
+	position: relative;
+	flex: none;
+	z-index: 40;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding: 4px 8px 0;
+	background: transparent;
+}
+
+.pdf-ink-popover {
+	position: absolute;
+	top: 100%;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 41;
+}
+
+.pdf-ink-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 0;
+	max-width: calc(100% - 16px);
+	padding: 2px;
+	border-radius: 999px;
+	background: var(--background-primary);
+	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.2));
+	overflow: hidden;
+	white-space: nowrap;
+	touch-action: manipulation;
+}
+
+.pdf-ink-group {
+	display: flex;
+	align-items: center;
+	gap: 0;
+}
+
+.pdf-ink-toolbar > .pdf-ink-group + .pdf-ink-group::before {
+	content: "";
+	width: 1px;
+	height: 14px;
+	margin: 0 3px;
+	background: var(--background-modifier-border);
+}
+
+/* Obsidian and themes style every <button> (grey fill, shadow, padding); these buttons are bare icons. */
+.pdf-ink button.pdf-ink-btn,
+.pdf-ink button.pdf-ink-swatch,
+.pdf-ink button.pdf-ink-menu-item {
+	appearance: none !important;
+	-webkit-appearance: none !important;
+	background: transparent !important;
+	background-color: transparent !important;
+	box-shadow: none !important;
+	border: 0 !important;
+	outline: none !important;
+	font-weight: normal;
+	line-height: 1;
+	min-height: 0;
+}
+
+.pdf-ink-btn,
+.pdf-ink-swatch {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	padding: 0 !important;
+	margin: 0;
+	border-radius: 999px !important;
+	color: var(--text-muted);
+	cursor: pointer;
+	flex: none;
+}
+
+.pdf-ink button.pdf-ink-btn:hover:not(:disabled),
+.pdf-ink button.pdf-ink-swatch:hover,
+.pdf-ink button.pdf-ink-menu-item:hover:not(:disabled) {
+	background: var(--background-modifier-hover) !important;
+	color: var(--text-normal);
+}
+
+.pdf-ink button.pdf-ink-btn.is-active {
+	background: var(--interactive-accent) !important;
+	color: var(--text-on-accent, #fff);
+}
+
+.pdf-ink button.pdf-ink-style.is-open {
+	background: var(--background-modifier-hover) !important;
+}
+
+.pdf-ink button.pdf-ink-swatch.is-active {
+	background: var(--background-modifier-border) !important;
+	box-shadow: inset 0 0 0 2px var(--interactive-accent) !important;
+}
+
+.pdf-ink-btn:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+
+.pdf-ink-icon,
+.pdf-ink-icon svg {
+	display: inline-flex;
+	width: 16px;
+	height: 16px;
+}
+
+.pdf-ink-zoom-level {
+	width: auto;
+	padding: 0 6px;
+	font-size: var(--font-ui-smaller, 11px);
+	font-variant-numeric: tabular-nums;
+}
+
+.pdf-ink-pages {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 0 4px;
+	font-size: var(--font-ui-smaller, 11px);
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.pdf-ink-page-input {
+	width: 2.4em;
+	height: 22px;
+	padding: 0 2px;
+	border: 0;
+	border-radius: var(--radius-s, 4px);
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-normal);
+	text-align: right;
+	font-size: var(--font-ui-smaller, 11px);
+	-moz-appearance: textfield;
+	appearance: textfield;
+}
+
+.pdf-ink-page-input:hover,
+.pdf-ink-page-input:focus {
+	background: var(--background-modifier-hover);
+	box-shadow: none;
+}
+
+.pdf-ink-style .pdf-ink-dot {
+	box-shadow: 0 0 0 1.5px var(--text-muted);
+}
+
+.pdf-ink-page-input::-webkit-inner-spin-button,
+.pdf-ink-page-input::-webkit-outer-spin-button {
+	-webkit-appearance: none;
+}
+
+.pdf-ink-swatch {
+	width: 26px;
+	height: 26px;
+}
+
+.pdf-ink-dot {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.pdf-ink-tool-options {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 4px;
+}
+
+.pdf-ink-opacity {
+	gap: 4px;
+	padding: 0 6px;
+	color: var(--text-muted);
+}
+
+.pdf-ink-opacity input[type="range"] {
+	width: 72px;
+	margin: 0;
+}
+
+.pdf-ink-popover {
+	margin-top: 2px;
+	padding: 4px;
+	border-radius: var(--radius-m, 8px);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.2));
+	max-width: calc(100% - 16px);
+}
+
+.pdf-ink-popover .pdf-ink-group {
+	flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------ full screen */
+
+body.pdf-ink-fullscreen-active .workspace-leaf-content.pdf-ink-fullscreen {
+	position: fixed !important;
+	inset: 0 !important;
+	width: 100vw !important;
+	height: 100vh !important;
+	padding-top: env(safe-area-inset-top);
+	padding-bottom: env(safe-area-inset-bottom);
+	box-sizing: border-box;
+	z-index: var(--layer-modal, 50) !important;
+	background: var(--background-secondary);
+}
+
+/* An ancestor with contain/transform would trap the fixed pane inside its own leaf. */
+body.pdf-ink-fullscreen-active .workspace-leaf:has(.pdf-ink-fullscreen),
+body.pdf-ink-fullscreen-active .workspace-tab-container:has(.pdf-ink-fullscreen),
+body.pdf-ink-fullscreen-active .workspace-tabs:has(.pdf-ink-fullscreen),
+body.pdf-ink-fullscreen-active .workspace-split:has(.pdf-ink-fullscreen) {
+	contain: none !important;
+	transform: none !important;
+	filter: none !important;
+	overflow: visible !important;
+}
+
+body.pdf-ink-fullscreen-active .workspace-leaf-content.pdf-ink-fullscreen > .view-header {
+	display: none !important;
+}
+
+body.pdf-ink-fullscreen-active .workspace-leaf-content.pdf-ink-fullscreen > .view-content {
+	height: 100% !important;
+}
+
+body.pdf-ink-fullscreen-hide-chrome .status-bar,
+body.pdf-ink-fullscreen-hide-chrome .mobile-navbar,
+body.pdf-ink-fullscreen-hide-chrome .mobile-toolbar,
+body.pdf-ink-fullscreen-hide-chrome .workspace-ribbon {
+	display: none !important;
+}
