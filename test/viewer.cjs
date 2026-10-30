@@ -163,6 +163,27 @@ const files = {
 	const n1 = await count();
 	const dirty1 = await page.evaluate(() => window.view.dirty);
 	check("a pen stroke becomes an ink annotation and marks the file dirty", n1 === 1 && dirty1 === true, `${n1}, dirty ${dirty1}`);
+	// The pen's companion touch events stop at the viewer (they would open Obsidian's side panels).
+	const swipe = await page.evaluate(([px, py]) => {
+		const target = document.elementFromPoint(px, py);
+		const seen = [];
+		const listener = (e) => seen.push(e.type + "@" + e.changedTouches[0].clientX);
+		document.addEventListener("touchmove", listener);
+		const send = (x, y, id) => {
+			const t = new Touch({ identifier: id, target, clientX: x, clientY: y });
+			target.dispatchEvent(new TouchEvent("touchmove", { touches: [t], changedTouches: [t], bubbles: true, cancelable: true }));
+		};
+		const pen = (type, x, y, extra = {}) => target.dispatchEvent(new PointerEvent(type, { pointerId: 77, pointerType: "pen", isPrimary: true, bubbles: true, cancelable: true, clientX: x, clientY: y, buttons: 1, pressure: 0.5, ...extra }));
+		pen("pointerdown", px, py);
+		send(px + 5, py, 1); // the pen's own touch: blocked
+		send(px + 300, py + 200, 2); // a finger elsewhere: passes
+		pen("pointerup", px, py, { buttons: 0, pressure: 0 });
+		send(px + 5, py, 1); // pen lifted: passes again
+		document.removeEventListener("touchmove", listener);
+		return seen;
+	}, [r0.x - 6, y + 300]); // in the viewport's gutter, beside the page
+	check("the pen's touch events are kept from Obsidian's swipe gesture while it is down", swipe.length === 2 && swipe[0].endsWith("@" + (r0.x - 6 + 300)) && swipe[1].endsWith("@" + (r0.x - 6 + 5)), JSON.stringify(swipe));
+
 	// A second stroke that starts on the first one draws instead of selecting it.
 	await stroke(x + 4, y + 2);
 	const over = await api(`[ann.getAnnotations().length, ann.getSelectedAnnotation()?.object?.id ?? null]`);

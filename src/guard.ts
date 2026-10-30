@@ -64,6 +64,9 @@ export function annotationHit(a: any, x: number, y: number, radius: number): boo
 	return false;
 }
 
+/** A touch this close to the pen's contact point (CSS px) is the pen itself. */
+const PEN_TOUCH_RADIUS = 48;
+
 /** Pen buttons that mean "erase": primary while hovering (S Pen), barrel (2) or eraser end (32). */
 const ERASER_BUTTONS = 1 | 2 | 32;
 
@@ -118,9 +121,17 @@ export class PointerGuard {
 		const forget = (e: Event) => this.forget(e as PointerEvent);
 		window.addEventListener("pointerup", forget);
 		window.addEventListener("pointercancel", forget);
+		// Android also reports the pen as touch events, and Obsidian's edge-swipe
+		// gesture (which opens the side panels) listens to those. While a pen is
+		// on the page, the touch events at the pen's position go no further.
+		// Fingers are left alone so EmbedPDF's two-finger pinch keeps working.
+		const penTouch = (e: Event) => this.blockPenTouch(e as TouchEvent);
+		const touchTypes = ["touchstart", "touchmove", "touchend", "touchcancel"];
+		for (const t of touchTypes) window.addEventListener(t, penTouch, { capture: true, passive: false });
 		this.off.push(() => {
 			window.removeEventListener("pointerup", forget);
 			window.removeEventListener("pointercancel", forget);
+			for (const t of touchTypes) window.removeEventListener(t, penTouch, true);
 		});
 	}
 
@@ -200,6 +211,21 @@ export class PointerGuard {
 		return { pageIndex: Number(page.dataset.pageIndex), x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale, scale };
 	}
 
+	/** Where the pen last touched the page, while it is down. */
+	private penAt: { id: number; x: number; y: number } | null = null;
+
+	private blockPenTouch(e: TouchEvent) {
+		const pen = this.penAt;
+		if (!pen || e.touches.length > 1) return;
+		for (let i = 0; i < e.changedTouches.length; i++) {
+			const t = e.changedTouches[i];
+			if (Math.hypot(t.clientX - pen.x, t.clientY - pen.y) <= PEN_TOUCH_RADIUS) {
+				e.stopImmediatePropagation();
+				return;
+			}
+		}
+	}
+
 	private forget(e: PointerEvent) {
 		if (e.pointerType === "touch") {
 			this.fingers.delete(e.pointerId);
@@ -208,6 +234,7 @@ export class PointerGuard {
 		} else {
 			this.pens.delete(e.pointerId);
 			if (this.erasing?.id === e.pointerId) this.erasing = null;
+			if (this.penAt?.id === e.pointerId) this.penAt = null;
 		}
 		if (this.pens.size === 0 && this.fingers.size === 0) this.sync();
 	}
@@ -232,7 +259,10 @@ export class PointerGuard {
 		}
 		const intercept = this.eraserActive && this.viewportAt(e.clientX, e.clientY) !== null;
 		this.pens.set(e.pointerId, intercept);
-		if (e.pointerType === "pen") this.sync();
+		if (e.pointerType === "pen") {
+			if (this.viewportAt(e.clientX, e.clientY)) this.penAt = { id: e.pointerId, x: e.clientX, y: e.clientY };
+			this.sync();
+		}
 		if (!intercept) return;
 		e.stopPropagation();
 		e.preventDefault();
@@ -315,6 +345,10 @@ export class PointerGuard {
 		}
 		if (this.pens.has(e.pointerId) && e.buttons === 0) this.forget(e); // a release nobody saw
 		const down = this.pens.has(e.pointerId);
+		if (down && this.penAt?.id === e.pointerId) {
+			this.penAt.x = e.clientX;
+			this.penAt.y = e.clientY;
+		}
 		if (e.pointerType === "pen" && !down) {
 			// A pen's side button while hovering: buttons pressed with no pointerdown
 			// and no pressure. It arms the eraser for the next stroke; letting go
