@@ -232,7 +232,55 @@ export class PointerGuard {
 		this.eraseAt(e.clientX, e.clientY);
 	}
 
+	/** True while the coalesced samples of a move are being re-dispatched. */
+	private replaying = false;
+
+	/**
+	 * Browsers deliver one pointermove per frame and fold the pen's faster
+	 * samples into getCoalescedEvents(); EmbedPDF reads only the event itself.
+	 * While a tool is drawing, the folded samples are dispatched to the same
+	 * target ahead of the real event so the stroke gets every sample.
+	 */
+	private replayCoalesced(e: PointerEvent) {
+		if (this.replaying || !e.isTrusted || typeof e.getCoalescedEvents !== "function") return;
+		if (this.activeTool() === null || !(e.target instanceof Element)) return;
+		const events = e.getCoalescedEvents();
+		if (events.length < 2) return;
+		this.replaying = true;
+		try {
+			for (let i = 0; i < events.length - 1; i++) {
+				const c = events[i];
+				e.target.dispatchEvent(
+					new PointerEvent("pointermove", {
+						bubbles: true,
+						cancelable: true,
+						composed: true,
+						clientX: c.clientX,
+						clientY: c.clientY,
+						screenX: c.screenX,
+						screenY: c.screenY,
+						pointerId: e.pointerId,
+						pointerType: e.pointerType,
+						isPrimary: e.isPrimary,
+						buttons: e.buttons,
+						button: -1,
+						pressure: c.pressure,
+						tiltX: c.tiltX,
+						tiltY: c.tiltY,
+						ctrlKey: e.ctrlKey,
+						shiftKey: e.shiftKey,
+						altKey: e.altKey,
+						metaKey: e.metaKey,
+					})
+				);
+			}
+		} finally {
+			this.replaying = false;
+		}
+	}
+
 	private onMove(e: PointerEvent) {
+		if (this.replaying) return;
 		if (e.pointerType === "touch") {
 			if (!this.blocked.has(e.pointerId)) return;
 			e.stopPropagation();
@@ -266,7 +314,10 @@ export class PointerGuard {
 			}
 		}
 		if (down) {
-			if (!this.pens.get(e.pointerId)) return;
+			if (!this.pens.get(e.pointerId)) {
+				this.replayCoalesced(e);
+				return;
+			}
 			e.stopPropagation();
 			e.preventDefault();
 			this.showCursor(e);

@@ -132,6 +132,14 @@ const files = {
 	const n1 = await count();
 	const dirty1 = await page.evaluate(() => window.view.dirty);
 	check("a pen stroke becomes an ink annotation and marks the file dirty", n1 === 1 && dirty1 === true, `${n1}, dirty ${dirty1}`);
+	// The 11 pointer samples of that zigzag are resampled along a spline through them.
+	const smooth = await api(`(() => {
+		const o = ann.getAnnotations()[0].object;
+		const pts = o.inkList[0].points;
+		const inside = pts.every((p) => p.x >= o.rect.origin.x && p.y >= o.rect.origin.y && p.x <= o.rect.origin.x + o.rect.size.width && p.y <= o.rect.origin.y + o.rect.size.height);
+		return { n: pts.length, inside };
+	})()`);
+	check("the stroke is smoothed through its samples", smooth.n > 11 && smooth.inside, JSON.stringify(smooth));
 
 	// Fingers: with the pen active a finger scrolls, two fingers pinch.
 	const s0 = await scrollTop();
