@@ -13,6 +13,10 @@ declare global {
 		handlers: Record<string, any>;
 		currentBytes?: Uint8Array;
 		settings: any;
+		clipboard: string[];
+		notes: Record<string, string>;
+		links: any[];
+		opened: any[];
 	}
 }
 
@@ -22,11 +26,31 @@ window.run = async (pdfUrl = "/sample.pdf") => {
 	const bytes = new Uint8Array(await (await fetch(pdfUrl)).arrayBuffer());
 	window.currentBytes = bytes;
 	const saved: Uint8Array[] = (window.saved = []);
-	const file = Object.assign(new TFile(), { name: "sample.pdf", basename: "sample", path: "sample.pdf", extension: "pdf" });
+	const file = Object.assign(new TFile(), { name: "sample.pdf", basename: "sample", path: "docs/sample.pdf", extension: "pdf", parent: { path: "docs" } });
 	const handlers: Record<string, any> = (window.handlers = {});
+	window.clipboard = [];
+	window.notes ??= {};
+	window.links ??= [];
+	window.opened = [];
+	(navigator as any).clipboard = { writeText: async (t: string) => void window.clipboard.push(t) };
+	const files: Record<string, any> = {};
 	const app = {
-		workspace: { on: (name: string, cb: any) => ((handlers["workspace:" + name] = cb), {}) },
+		workspace: {
+			on: (name: string, cb: any) => ((handlers["workspace:" + name] = cb), {}),
+			getLeavesOfType: () => [],
+			getLeaf: () => ({ openFile: async (f: any, o: any) => void window.opened.push([f.path, o]) }),
+			createLeafBySplit: () => ({ openFile: async (f: any) => void window.opened.push(["split", f.path]) }),
+			revealLeaf: () => {},
+			setActiveLeaf: () => {},
+		},
 		scope: {},
+		metadataCache: {
+			on: (name: string, cb: any) => ((handlers["meta:" + name] = cb), {}),
+			fileToLinktext: (f: TFile) => f.basename + "." + f.extension,
+			resolvedLinks: {} as Record<string, Record<string, number>>,
+			getFileCache: (f: any) => ({ links: window.links.filter((l) => l.source === f.path), embeds: [] }),
+			getFirstLinkpathDest: (link: string) => (link === "sample.pdf" || link === "docs/sample.pdf" ? file : null),
+		},
 		vault: {
 			on: (name: string, cb: any) => ((handlers["vault:" + name] = cb), {}),
 			readBinary: async () => window.currentBytes!.slice().buffer,
@@ -34,8 +58,16 @@ window.run = async (pdfUrl = "/sample.pdf") => {
 				saved.push(new Uint8Array(buf));
 				window.currentBytes = new Uint8Array(buf);
 			},
+			getAbstractFileByPath: (p: string) => files[p] ?? (window.links.some((l) => l.source === p) ? Object.assign(new TFile(), { path: p, name: p.split("/").pop(), basename: p.split("/").pop()!.replace(/\.md$/, ""), extension: "md" }) : null),
+			create: async (p: string, data: string) => {
+				window.notes[p] = data;
+				return (files[p] = Object.assign(new TFile(), { path: p, name: p.split("/").pop(), basename: p.split("/").pop()!.replace(/\.md$/, ""), extension: "md" }));
+			},
+			createFolder: async () => {},
+			process: async (f: any, fn: (d: string) => string) => (window.notes[f.path] = fn(window.notes[f.path] ?? "")),
 		},
 	};
+	for (const l of window.links) ((app.metadataCache.resolvedLinks[l.source] ??= {})[file.path] = 1);
 	window.settings ??= normalizeSettings({ ...DEFAULT_SETTINGS, autosave: false });
 	enginePromise ??= (async () => {
 		const wasm = await (await fetch("/pdfium.wasm")).arrayBuffer();

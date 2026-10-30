@@ -1,31 +1,69 @@
 # PDF Ink
 
-An [Obsidian](https://obsidian.md) plugin for writing on PDFs with a stylus. Pen, highlighter and eraser; the strokes are saved as standard ink annotations inside the PDF file, so any other PDF reader shows them too.
+An Obsidian plugin for annotating PDFs with a stylus, built on the
+[EmbedPDF](https://www.embedpdf.com) headless engine (PDFium) with its own UI.
 
-Built on [EmbedPDF](https://github.com/embedpdf/embed-pdf-viewer) (Apache-2.0), which renders pages with PDFium compiled to WebAssembly and provides the annotation tools. The plugin adds its own toolbar, stylus handling and the vault integration.
+## Tools
 
-## Features
+One tool is active at a time, picked on the floating toolbar:
 
-- Pen in your own colours and widths (both editable in settings), freehand highlighter, text highlighter (select text to mark it), eraser, undo and redo. Strokes are smoothed through the pen's samples (can be switched off).
-- Stylus mode (toolbar button): fingers scroll and pinch to zoom while a pen tool is active; only the stylus draws. Switch it off to draw with fingers.
-- The pen's side button (S Pen, Surface Pen) arms the eraser for the next stroke.
-- Autosave into the PDF a few seconds after the last stroke, or save with Ctrl/Cmd+S.
-- Works on desktop and on Android and iOS tablets. No network access: fonts, the PDF engine and the viewer all ship in the plugin folder.
+| Tool | What it does | EmbedPDF |
+| --- | --- | --- |
+| Hand | Drag to pan; one finger scrolls, two fingers pinch to zoom | native pan mode |
+| Pointer | Select text (link / highlight / copy menu); tap an annotation to select it; drag a box to select several | native pointer mode and marquee |
+| Pen | Freehand ink with colour, width and opacity | native `ink` tool |
+| Highlighter | Translucent freehand marker | native `inkHighlighter` tool |
+| Text highlighter | Select text to highlight it | native `highlight` tool |
+| Eraser | Remove the strokes and highlights the pointer crosses; a pen's side button while hovering erases one stroke | plugin addition |
+| Area link | Drag a box; copy it as a link or embed | native capture marquee, link formatting is a plugin addition |
 
-## Install (manual)
+**Stylus mode** (toolbar button): fingers pan and scroll while only the pen
+draws. Off: a finger draws too, unless the hand or pointer tool is active.
 
-Copy `main.js`, `styles.css`, `manifest.json` and `pdfium.wasm` from a release into `<vault>/.obsidian/plugins/pdf-ink/`, then enable the plugin in **Settings → Community plugins**.
+**Full screen**: the PDF pane covers the Obsidian window, with only the
+toolbar left. `Esc` or the button leaves.
 
-Open a PDF through its file menu ("Open in PDF Ink"), the command palette, or turn on **Open PDFs with PDF Ink** in the plugin's settings.
+## Links
+
+Text selections and areas become PDF++-style links such as
+`[[paper.pdf#page=3&rect=72,500,300,560|the selected text]]`. The `page` and
+`rect` parameters are what PDF++ and Obsidian's built-in viewer understand,
+so the links open there too. Formats are templates in the settings with
+`{{file}}`, `{{path}}`, `{{page}}`, `{{rect}}`, `{{text}}` and `{{color}}`.
+
+Links from notes to a page area are drawn as boxes on the page; clicking one
+opens the note at the link. Following a link into the PDF scrolls to the page
+and flashes the area.
+
+A **sidecar note** (`Open sidecar note`) opens beside the PDF; copied links
+can go to the clipboard, the sidecar note, or both.
+
+Note: rect coordinates assume the page box starts at the origin; on PDFs
+with an offset CropBox the position can differ from PDF++ by that offset.
+PDF++'s `selection=` parameter encodes pdf.js text-layer offsets, which
+cannot be produced from PDFium's text geometry. PDF Ink writes `rect` links
+for text selections instead, and shows backlinks only for links that carry a
+`rect`.
+
+## Not native to EmbedPDF
+
+These are plugin additions on top of EmbedPDF: stylus mode and finger
+scrolling while a drawing tool is active, the eraser, the pen's side button,
+stroke smoothing, feeding the pen's full sample rate to strokes, grouped undo
+for multi-deletes, link formatting, backlinks, the sidecar note and the
+full-screen mode.
+
+## Install
+
+Copy `main.js`, `styles.css`, `manifest.json` and `pdfium.wasm` from a
+release into `<vault>/.obsidian/plugins/pdf-ink/` and enable the plugin.
+Turn on *Open PDFs with PDF Ink* in the settings to make it the default PDF
+viewer, or use *Open in PDF Ink* from a PDF's file menu.
 
 ## Build
 
-```sh
+```
 npm install
 npm run build   # main.js, styles.css, pdfium.wasm
-npm test        # headless Chromium checks (needs Playwright's Chromium)
+npm test        # unit checks and headless-Chromium end-to-end checks
 ```
-
-## License
-
-MIT. EmbedPDF and PDFium are included under their own licences (Apache-2.0 and BSD-3-Clause).

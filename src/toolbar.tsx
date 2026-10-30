@@ -1,163 +1,278 @@
-import { useEffect, useRef } from "preact/hooks";
-import { setIcon, setTooltip } from "obsidian";
-import { useAnnotation, useAnnotationCapability } from "@embedpdf/plugin-annotation/preact";
-import { ZoomMode, useZoom } from "@embedpdf/plugin-zoom/preact";
-import { useHistoryCapability } from "@embedpdf/plugin-history/preact";
-import { useScroll } from "@embedpdf/plugin-scroll/preact";
+/**
+ * The floating toolbar. It measures itself and folds, step by step, as the
+ * pane gets narrower: first the active tool's options go into a popover, then
+ * zoom and page controls into the overflow menu, then undo/redo, sidecar and
+ * full screen, and finally the drawing tools into one picker.
+ */
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import type { ComponentChildren } from "preact";
+import { Icon } from "./icon";
 import type { Settings } from "./settings";
+import { STYLED_TOOLS, ToolController, ToolId } from "./tools";
 
-interface ToolbarProps {
-	documentId: string;
-	settings: Settings;
-	eraser: boolean;
-	setEraser(on: boolean): void;
-	onSettingsChange(): void;
-	/** The active EmbedPDF tool changed (the pointer guard re-checks what to block). */
-	onToolChange(): void;
+const MAX_LEVEL = 4;
+
+interface ToolDef {
+	id: ToolId;
+	icon: string;
+	label: string;
 }
 
-/** Toolbar dot diameter for a pen width: 4 px for the finest up to 22 px. */
-function dotSize(width: number): number {
+const NAV_TOOLS: ToolDef[] = [
+	{ id: "hand", icon: "hand", label: "Hand: pan and scroll" },
+	{ id: "pointer", icon: "mouse-pointer-2|mouse-pointer", label: "Pointer: select" },
+];
+const DRAW_TOOLS: ToolDef[] = [
+	{ id: "pen", icon: "pen-line|pencil", label: "Pen" },
+	{ id: "marker", icon: "highlighter", label: "Highlighter" },
+	{ id: "textHighlight", icon: "text-select|text-cursor-input|type", label: "Text highlighter" },
+	{ id: "eraser", icon: "eraser", label: "Eraser" },
+	{ id: "areaLink", icon: "scan", label: "Area link" },
+];
+
+/** Dot diameter on the toolbar for a stroke width in PDF points. */
+export function dotSize(width: number): number {
 	return Math.round(Math.min(22, Math.max(4, 4 + 4.5 * Math.sqrt(width))));
 }
 
-/** An Obsidian (Lucide) icon. */
-function Icon({ name }: { name: string }) {
-	const ref = useRef<HTMLSpanElement>(null);
-	useEffect(() => {
-		if (ref.current) setIcon(ref.current, name);
-	}, [name]);
-	return <span class="pdf-ink-icon" ref={ref} />;
+interface Props {
+	tools: ToolController;
+	settings: Settings;
+	onOpenSidecar(): void;
 }
 
-function Button({ tip, active, onClick, children, cls }: { tip: string; active?: boolean; onClick(): void; children: any; cls?: string }) {
-	const ref = useRef<HTMLButtonElement>(null);
+type Popover = "options" | "tools" | "more" | null;
+
+export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
+	const [, bump] = useState(0);
+	useEffect(() => tools.subscribe(() => bump((n) => n + 1)), [tools]);
+	const state = tools.state();
+	const hostRef = useRef<HTMLDivElement>(null);
+	const pillRef = useRef<HTMLDivElement>(null);
+	const [level, setLevel] = useState(0);
+	const need = useRef<number[]>([]);
+	const [popover, setPopover] = useState<Popover>(null);
+
+	// Fold or unfold until the pill fits the pane.
+	useLayoutEffect(() => {
+		const host = hostRef.current, pill = pillRef.current;
+		if (!host || !pill) return;
+		const measure = () => {
+			const avail = host.clientWidth - 16;
+			const width = pill.scrollWidth;
+			need.current[level] = width;
+			if (width > avail && level < MAX_LEVEL) setLevel(level + 1);
+			// Unfold when the wider layout is known to fit, or try it when unknown (it folds back if not).
+			else if (level > 0 && (need.current[level - 1] === undefined || need.current[level - 1] <= avail)) setLevel(level - 1);
+		};
+		measure();
+		const ro = new ResizeObserver(measure);
+		ro.observe(host);
+		ro.observe(pill);
+		return () => ro.disconnect();
+	}, [level, state.tool, state.pages, state.zoom]);
+	// A different tool needs a different width at each level: measure afresh.
 	useEffect(() => {
-		if (ref.current) setTooltip(ref.current, tip);
-	}, [tip]);
-	return (
-		<button
-			ref={ref}
-			type="button"
-			class={`pdf-ink-btn ${cls ?? ""} ${active ? "is-active" : ""}`}
-			aria-label={tip}
-			aria-pressed={active ? "true" : undefined}
-			onPointerDown={(e) => e.preventDefault()}
-			onClick={(e) => {
-				e.preventDefault();
-				onClick();
-			}}
-		>
-			{children}
+		need.current = [];
+	}, [state.tool]);
+
+	// Any tap outside closes a popover.
+	useEffect(() => {
+		if (!popover) return;
+		const doc = hostRef.current?.ownerDocument ?? document;
+		const close = (e: Event) => {
+			if (!hostRef.current?.contains(e.target as Node)) setPopover(null);
+		};
+		const key = (e: KeyboardEvent) => e.key === "Escape" && setPopover(null);
+		doc.addEventListener("pointerdown", close, true);
+		doc.addEventListener("keydown", key);
+		return () => {
+			doc.removeEventListener("pointerdown", close, true);
+			doc.removeEventListener("keydown", key);
+		};
+	}, [popover]);
+
+	const pick = (id: ToolId) => {
+		if (id === state.tool && STYLED_TOOLS.has(id)) setPopover(popover === "options" ? null : "options");
+		else {
+			tools.setTool(id);
+			setPopover(null);
+		}
+	};
+	const activeDraw = DRAW_TOOLS.find((t) => t.id === state.tool) ?? DRAW_TOOLS[0];
+	const styled = STYLED_TOOLS.has(state.tool);
+
+	const toolButton = (t: ToolDef) => (
+		<button key={t.id} class={"pdf-ink-btn pdf-ink-tool" + (state.tool === t.id || (t.id === "eraser" && state.penEraser) ? " is-active" : "")} aria-label={t.label} data-tool={t.id} onClick={() => pick(t.id)}>
+			<Icon name={t.icon} />
 		</button>
+	);
+
+	const zoomControls = (
+		<>
+			<button class="pdf-ink-btn" aria-label="Zoom out" onClick={() => tools.zoomOut()}>
+				<Icon name="zoom-out" />
+			</button>
+			<button class="pdf-ink-btn pdf-ink-zoom-level" aria-label="Fit width" onClick={() => tools.fitWidth()}>
+				{Math.round(state.zoom * 100)}%
+			</button>
+			<button class="pdf-ink-btn" aria-label="Zoom in" onClick={() => tools.zoomIn()}>
+				<Icon name="zoom-in" />
+			</button>
+		</>
+	);
+	const pageControl = (
+		<span class="pdf-ink-pages">
+			<input
+				class="pdf-ink-page-input"
+				type="number"
+				min={1}
+				max={state.pages || 1}
+				value={state.page}
+				aria-label="Page"
+				onChange={(e) => tools.goToPage(Number((e.target as HTMLInputElement).value))}
+				onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+			/>
+			<span class="pdf-ink-page-total">/ {state.pages}</span>
+		</span>
+	);
+	const historyControls = (
+		<>
+			<button class="pdf-ink-btn" aria-label="Undo" disabled={!state.canUndo} onClick={() => tools.undo()}>
+				<Icon name="undo-2" />
+			</button>
+			<button class="pdf-ink-btn" aria-label="Redo" disabled={!state.canRedo} onClick={() => tools.redo()}>
+				<Icon name="redo-2" />
+			</button>
+		</>
+	);
+	const viewControls = (
+		<>
+			<button class="pdf-ink-btn" aria-label="Open sidecar note" onClick={onOpenSidecar}>
+				<Icon name="notebook-pen|notebook|file-text" />
+			</button>
+			<button class={"pdf-ink-btn" + (state.fullscreen ? " is-active" : "")} aria-label={state.fullscreen ? "Exit full screen" : "Full screen"} onClick={() => tools.toggleFullscreen()}>
+				<Icon name={state.fullscreen ? "minimize-2" : "maximize-2"} />
+			</button>
+		</>
+	);
+
+	const menuItem = (icon: string, label: string, onClick: () => void, disabled = false) => (
+		<button class="pdf-ink-menu-item" disabled={disabled} onClick={() => (onClick(), setPopover(null))}>
+			<Icon name={icon} /> {label}
+		</button>
+	);
+
+	return (
+		<div class="pdf-ink-toolbar-host" ref={hostRef} data-level={level}>
+			<div class="pdf-ink-toolbar" ref={pillRef} role="toolbar" aria-label="PDF Ink">
+				<div class="pdf-ink-group">{NAV_TOOLS.map(toolButton)}</div>
+				<div class="pdf-ink-group">
+					{level < 4 ? (
+						DRAW_TOOLS.map(toolButton)
+					) : (
+						<>
+							{toolButton(activeDraw)}
+							<button class="pdf-ink-btn pdf-ink-chevron" aria-label="Drawing tools" onClick={() => setPopover(popover === "tools" ? null : "tools")}>
+								<Icon name="chevron-down" />
+							</button>
+						</>
+					)}
+				</div>
+				{styled && level === 0 && (
+					<div class="pdf-ink-group pdf-ink-options">
+						<ToolOptions tools={tools} settings={settings} />
+					</div>
+				)}
+				{styled && level > 0 && (
+					<div class="pdf-ink-group">
+						<button class={"pdf-ink-btn" + (popover === "options" ? " is-active" : "")} aria-label="Tool options" onClick={() => setPopover(popover === "options" ? null : "options")}>
+							<span class="pdf-ink-dot" style={{ background: tools.style()?.color, width: dotSize(tools.style()?.width || 3), height: dotSize(tools.style()?.width || 3), opacity: tools.style()?.opacity }} />
+						</button>
+					</div>
+				)}
+				<div class="pdf-ink-group">
+					<button class={"pdf-ink-btn pdf-ink-stylus" + (state.stylusMode ? " is-active" : "")} aria-label={state.stylusMode ? "Stylus mode on: fingers scroll, the pen draws" : "Stylus mode off: fingers draw too"} onClick={() => tools.setStylusMode(!state.stylusMode)}>
+						<Icon name="pen-tool" />
+					</button>
+				</div>
+				{level < 3 && <div class="pdf-ink-group">{historyControls}</div>}
+				{level < 2 && <div class="pdf-ink-group">{pageControl}</div>}
+				{level < 2 && <div class="pdf-ink-group">{zoomControls}</div>}
+				{level < 3 && <div class="pdf-ink-group">{viewControls}</div>}
+				{level >= 2 && (
+					<div class="pdf-ink-group">
+						<button class={"pdf-ink-btn pdf-ink-more" + (popover === "more" ? " is-active" : "")} aria-label="More" onClick={() => setPopover(popover === "more" ? null : "more")}>
+							<Icon name="ellipsis|more-horizontal" />
+						</button>
+					</div>
+				)}
+			</div>
+			{popover === "options" && styled && (
+				<Pop>
+					<ToolOptions tools={tools} settings={settings} vertical />
+				</Pop>
+			)}
+			{popover === "tools" && (
+				<Pop>
+					<div class="pdf-ink-group">{DRAW_TOOLS.map(toolButton)}</div>
+				</Pop>
+			)}
+			{popover === "more" && (
+				<Pop menu>
+					{level >= 3 && menuItem("undo-2", "Undo", () => tools.undo(), !state.canUndo)}
+					{level >= 3 && menuItem("redo-2", "Redo", () => tools.redo(), !state.canRedo)}
+					<div class="pdf-ink-menu-row">
+						{pageControl}
+						{zoomControls}
+					</div>
+					{menuItem("move-horizontal|arrow-left-right", "Fit width", () => tools.fitWidth())}
+					{menuItem("maximize", "Fit page", () => tools.fitPage())}
+					{level >= 3 && menuItem("notebook-pen|notebook|file-text", "Open sidecar note", onOpenSidecar)}
+					{level >= 3 && menuItem(state.fullscreen ? "minimize-2" : "maximize-2", state.fullscreen ? "Exit full screen" : "Full screen", () => tools.toggleFullscreen())}
+				</Pop>
+			)}
+		</div>
 	);
 }
 
-export function Toolbar({ documentId, settings, eraser, setEraser, onSettingsChange, onToolChange }: ToolbarProps) {
-	const { provides: annotations, state } = useAnnotation(documentId);
-	const { provides: annotationTools } = useAnnotationCapability();
-	const { provides: zoom, state: zoomState } = useZoom(documentId);
-	const { provides: history } = useHistoryCapability();
-	const { state: pages, provides: scroll } = useScroll(documentId);
-	const tool = eraser ? "eraser" : (state?.activeToolId ?? null);
-
-	useEffect(() => onToolChange(), [state?.activeToolId]);
-
-	const apply = () => {
-		annotationTools?.setToolDefaults("ink", { strokeColor: settings.penColor, color: settings.penColor, strokeWidth: settings.penWidth, opacity: 1 } as any);
-		annotationTools?.setToolDefaults("inkHighlighter", { strokeColor: settings.highlightColor, color: settings.highlightColor, strokeWidth: settings.highlightWidth } as any);
-		annotationTools?.setToolDefaults("highlight", { strokeColor: settings.highlightColor, color: settings.highlightColor } as any);
-	};
-	const pick = (toolId: string | null) => {
-		setEraser(false);
-		apply();
-		annotations?.setActiveTool(toolId);
-	};
-	const pen = (color: string) => {
-		settings.penColor = color;
-		onSettingsChange();
-		pick("ink");
-	};
-	const width = (w: number) => {
-		settings.penWidth = w;
-		onSettingsChange();
-		pick("ink");
-	};
-	const stylus = (on: boolean) => {
-		settings.palmRejection = on;
-		onSettingsChange();
-		onToolChange();
-	};
-	const highlighter = (color: string) => {
-		settings.highlightColor = color;
-		onSettingsChange();
-		// A swatch keeps the current highlighter kind: freehand, or text selection.
-		pick(tool === "highlight" ? "highlight" : "inkHighlighter");
-	};
-	const docHistory = history?.forDocument(documentId);
-	const percent = Math.round((zoomState?.currentZoomLevel ?? 1) * 100);
-
+function Pop({ children, menu }: { children: ComponentChildren; menu?: boolean }) {
 	return (
-		<div class="pdf-ink-toolbar" role="toolbar">
-			<Button tip="Select and scroll" active={tool === null} onClick={() => pick(null)}>
-				<Icon name="mouse-pointer-2" />
-			</Button>
-			<span class="pdf-ink-sep" />
-			{settings.penColors.map((color) => (
-				<Button key={color} tip={`Pen ${color}`} cls="pdf-ink-swatch" active={tool === "ink" && settings.penColor === color} onClick={() => pen(color)}>
-					<span class="pdf-ink-dot" style={{ background: color }} />
-				</Button>
-			))}
-			<span class="pdf-ink-sep" />
-			{settings.penWidths.map((w) => (
-				<Button key={w} tip={`Pen width ${w} pt`} cls="pdf-ink-width" active={tool === "ink" && settings.penWidth === w} onClick={() => width(w)}>
-					<span class="pdf-ink-dot" style={{ width: dotSize(w), height: dotSize(w) }} />
-				</Button>
-			))}
-			<span class="pdf-ink-sep" />
-			{settings.highlightColors.map((color) => (
-				<Button key={color} tip={`Highlighter ${color}`} cls="pdf-ink-swatch pdf-ink-highlighter" active={(tool === "inkHighlighter" || tool === "highlight") && settings.highlightColor === color} onClick={() => highlighter(color)}>
-					<span class="pdf-ink-dot" style={{ background: color }} />
-				</Button>
-			))}
-			<Button tip="Highlight text: select text to highlight it" cls="pdf-ink-text-highlight" active={tool === "highlight"} onClick={() => pick(tool === "highlight" ? "inkHighlighter" : "highlight")}>
-				<Icon name="text-select" />
-			</Button>
-			<span class="pdf-ink-sep" />
-			<Button tip="Eraser (or press the pen's side button)" active={eraser} onClick={() => setEraser(!eraser)}>
-				<Icon name="eraser" />
-			</Button>
-			<span class="pdf-ink-sep" />
-			<Button tip="Stylus mode: fingers scroll and pinch, only the pen draws. Off: fingers draw too." cls="pdf-ink-stylus" active={settings.palmRejection} onClick={() => stylus(!settings.palmRejection)}>
-				<Icon name="pen-tool" />
-			</Button>
-			<span class="pdf-ink-sep" />
-			<Button tip="Undo" onClick={() => docHistory?.undo()}>
-				<Icon name="undo-2" />
-			</Button>
-			<Button tip="Redo" onClick={() => docHistory?.redo()}>
-				<Icon name="redo-2" />
-			</Button>
-			<span class="pdf-ink-grow" />
-			<span class="pdf-ink-pages">
-				{pages.currentPage} / {pages.totalPages}
-			</span>
-			<Button tip="Previous page" onClick={() => scroll?.scrollToPreviousPage()}>
-				<Icon name="chevron-up" />
-			</Button>
-			<Button tip="Next page" onClick={() => scroll?.scrollToNextPage()}>
-				<Icon name="chevron-down" />
-			</Button>
-			<span class="pdf-ink-sep" />
-			<Button tip="Zoom out" onClick={() => zoom?.zoomOut()}>
-				<Icon name="zoom-out" />
-			</Button>
-			<Button tip="Fit width" onClick={() => zoom?.requestZoom(ZoomMode.FitWidth)}>
-				<span class="pdf-ink-zoom-level">{percent}%</span>
-			</Button>
-			<Button tip="Zoom in" onClick={() => zoom?.zoomIn()}>
-				<Icon name="zoom-in" />
-			</Button>
+		<div class={"pdf-ink-popover" + (menu ? " pdf-ink-menu" : "")} onPointerDown={(e) => e.stopPropagation()}>
+			{children}
+		</div>
+	);
+}
+
+/** Colour, width and opacity of the active styled tool. */
+function ToolOptions({ tools, settings, vertical }: { tools: ToolController; settings: Settings; vertical?: boolean }) {
+	const tool = tools.tool;
+	const style = tools.style(tool);
+	if (!style) return null;
+	const colors = tool === "pen" ? settings.penColors : settings.highlightColors;
+	const widths = tool === "pen" ? settings.penWidths : tool === "marker" ? settings.markerWidths : [];
+	return (
+		<div class={"pdf-ink-tool-options" + (vertical ? " is-vertical" : "")}>
+			<div class="pdf-ink-group pdf-ink-swatches">
+				{colors.map((c) => (
+					<button key={c} class={"pdf-ink-swatch" + (style.color === c ? " is-active" : "")} aria-label={`Colour ${c}`} onClick={() => tools.setStyle(tool, { color: c })}>
+						<span class="pdf-ink-dot" style={{ background: c }} />
+					</button>
+				))}
+			</div>
+			{widths.length > 0 && (
+				<div class="pdf-ink-group pdf-ink-widths">
+					{widths.map((w) => (
+						<button key={w} class={"pdf-ink-swatch" + (style.width === w ? " is-active" : "")} aria-label={`Width ${w}`} onClick={() => tools.setStyle(tool, { width: w })}>
+							<span class="pdf-ink-dot" style={{ width: dotSize(w), height: dotSize(w), background: style.color }} />
+						</button>
+					))}
+				</div>
+			)}
+			<div class="pdf-ink-group pdf-ink-opacity">
+				<Icon name="blend|droplet" />
+				<input type="range" min={5} max={100} step={5} value={Math.round(style.opacity * 100)} aria-label="Opacity" onInput={(e) => tools.setStyle(tool, { opacity: Number((e.target as HTMLInputElement).value) / 100 })} />
+			</div>
 		</div>
 	);
 }

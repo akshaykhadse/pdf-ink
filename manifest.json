@@ -1,9 +1,9 @@
 {
 	"id": "pdf-ink",
 	"name": "PDF Ink",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"minAppVersion": "1.5.0",
-	"description": "Write on PDFs with a stylus: pen, highlighter and eraser, saved as real annotations in the file. Built on EmbedPDF (PDFium).",
+	"description": "Annotate PDFs with a stylus: pen, highlighters, text highlights, PDF++-style links and a full-screen mode. Built on EmbedPDF (PDFium).",
 	"author": "Akshay Khadse",
 	"authorUrl": "https://github.com/akshaykhadse",
 	"isDesktopOnly": false

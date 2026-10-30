@@ -1,5 +1,6 @@
-// Builds main.js (the plugin), styles.css and pdfium.wasm into the repo root;
-// `node scripts/build.mjs test` also builds the browser test harness.
+// Builds main.js, styles.css and pdfium.wasm into the repo root.
+// `node scripts/build.mjs production` minifies; `node scripts/build.mjs test`
+// also builds the browser test harness into test/out/.
 import esbuild from "esbuild";
 import { copyFileSync, mkdirSync } from "node:fs";
 
@@ -34,7 +35,7 @@ console.log("styles.css and pdfium.wasm written");
 
 if (mode === "test") {
 	mkdirSync("test/out", { recursive: true });
-	await esbuild.build({ ...common, entryPoints: ["src/ink.ts"], outfile: "test/out/ink.cjs" });
+	await esbuild.build({ ...common, entryPoints: ["test/units.ts"], alias: { obsidian: "./test/obsidian-shim.ts" }, outfile: "test/out/units.cjs" });
 	await esbuild.build({
 		...common,
 		entryPoints: ["test/harness.tsx"],

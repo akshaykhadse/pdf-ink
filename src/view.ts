@@ -1,6 +1,7 @@
 import { FileView, Notice, Scope, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import type PdfInkPlugin from "./main";
-import { ViewerHandle, mountViewer } from "./app";
+import { ViewerHandle, mountViewer } from "./viewer";
+import { Backlink, LinkVars, collectBacklinks, deliverLink, openBacklink, openSidecar } from "./links";
 
 export const VIEW_TYPE = "pdf-ink";
 
@@ -11,14 +12,19 @@ export class PdfInkView extends FileView {
 	allowNoFile = false;
 	private rootEl!: HTMLElement;
 	private unmount: (() => void) | null = null;
-	private refresh: (() => void) | null = null;
 	private handle: ViewerHandle | null = null;
 	/** Bumped per open, so a load that finishes after the file changed is dropped. */
 	private openToken = 0;
-	private dirty = false;
+	dirty = false;
 	private saving: Promise<boolean> | null = null;
 	private ignoreModifyUntil = 0;
 	private readonly requestAutosave: () => void;
+	private readonly requestBacklinks: () => void;
+	private fullscreen = false;
+	/** A link target that arrived before the document was open. */
+	private pendingSubpath: string | null = null;
+	/** Notes that linked to this PDF at the last backlink scan. */
+	private backlinkSources = new Set<string>();
 
 	constructor(leaf: WorkspaceLeaf, readonly plugin: PdfInkPlugin) {
 		super(leaf);
@@ -27,7 +33,13 @@ export class PdfInkView extends FileView {
 			void this.saveNow(true);
 			return false;
 		});
+		this.scope.register([], "Escape", () => {
+			if (!this.fullscreen) return true;
+			this.setFullscreen(false);
+			return false;
+		});
 		this.requestAutosave = debounce(() => void this.saveNow(false), AUTOSAVE_QUIET_MS, true);
+		this.requestBacklinks = debounce(() => this.handle?.refreshBacklinks(), 400, true);
 	}
 
 	getViewType() {
@@ -57,12 +69,23 @@ export class PdfInkView extends FileView {
 				if (Date.now() < this.ignoreModifyUntil || this.saving) return;
 				// Changed elsewhere (sync, another device): show the file as it is now.
 				if (!this.dirty) void this.loadPdf(file);
-				else new Notice(`${file.name} changed elsewhere; your unsaved strokes will be written over that version.`, 8000);
+				else new Notice(`${file.name} changed elsewhere; your unsaved annotations will be written over that version.`, 8000);
+			})
+		);
+		this.registerEvent(this.app.metadataCache.on("resolved", () => this.requestBacklinks()));
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (changed) => {
+				// Only notes that link (or linked) to this PDF matter, not every keystroke in the vault.
+				const pdf = this.file?.path;
+				if (!pdf) return;
+				const linksNow = !!this.app.metadataCache.resolvedLinks[changed.path]?.[pdf];
+				if (linksNow || this.backlinkSources.has(changed.path)) this.requestBacklinks();
 			})
 		);
 	}
 
 	async onClose() {
+		this.setFullscreen(false);
 		await this.flush();
 		this.unmountViewer();
 		await super.onClose();
@@ -77,6 +100,16 @@ export class PdfInkView extends FileView {
 		this.unmountViewer();
 	}
 
+	/** Obsidian passes the link's "#page=..&rect=.." here when a link to the PDF is followed. */
+	setEphemeralState(state: any) {
+		const subpath: string | undefined = state?.subpath;
+		if (typeof subpath === "string" && subpath) {
+			if (this.handle) this.handle.goTo(subpath);
+			else this.pendingSubpath = subpath;
+		}
+		super.setEphemeralState(state);
+	}
+
 	/** Saves pending changes, if any. */
 	async flush() {
 		// A stroke becomes an annotation a moment after the pen lifts.
@@ -88,14 +121,33 @@ export class PdfInkView extends FileView {
 	/** Settings changed in the settings tab: push them into the open viewer. */
 	settingsChanged() {
 		this.handle?.applySettings();
-		this.refresh?.();
 	}
+
+	// ---------------------------------------------------------------- full screen
+
+	isFullscreen() {
+		return this.fullscreen;
+	}
+
+	/** Full screen inside Obsidian: the pane covers the window; Esc or the button leaves. */
+	setFullscreen(on: boolean) {
+		if (this.fullscreen === on) return;
+		this.fullscreen = on;
+		this.containerEl.toggleClass("pdf-ink-fullscreen", on);
+		const body = this.containerEl.ownerDocument.body; // the pane may live in a pop-out window
+		body.toggleClass("pdf-ink-fullscreen-active", on);
+		body.toggleClass("pdf-ink-fullscreen-hide-chrome", on && this.plugin.settings.fullscreenHidesChrome);
+		this.handle?.tools.notify();
+		if (on) this.app.workspace.setActiveLeaf(this.leaf, { focus: true });
+		(this.containerEl.ownerDocument.defaultView ?? window).dispatchEvent(new Event("resize"));
+	}
+
+	// ----------------------------------------------------------------- loading
 
 	private unmountViewer() {
 		this.openToken++;
 		this.unmount?.();
 		this.unmount = null;
-		this.refresh = null;
 		this.handle = null;
 		this.dirty = false;
 	}
@@ -113,26 +165,58 @@ export class PdfInkView extends FileView {
 				engine,
 				bytes,
 				name: file.name,
-				settings: this.plugin.settings,
+				host: {
+					settings: () => this.plugin.settings,
+					saveSettings: () => void this.plugin.saveSettings(),
+					onChange: () => this.markDirty(),
+					setFullscreen: (on) => this.setFullscreen(on),
+					isFullscreen: () => this.fullscreen,
+					linkVars: (page, rect, text, color) => this.linkVars(file, page, rect, text, color),
+					deliverLink: (text) => deliverLink(this.app, this.plugin.settings, file, text),
+					backlinks: () => this.backlinks(file),
+					openBacklink: (link: Backlink) => void openBacklink(this.app, link, file.path),
+					openSidecar: () => void openSidecar(this.app, this.plugin.settings, file, this.leaf).catch((e) => new Notice(`PDF Ink: ${e?.message ?? e}`)),
+				},
 				onReady: (handle) => {
 					if (token !== this.openToken) return;
 					this.handle = handle;
 					this.rootEl.removeClass("is-loading");
+					if (this.pendingSubpath) {
+						const sub = this.pendingSubpath;
+						this.pendingSubpath = null;
+						setTimeout(() => handle.goTo(sub), 150);
+					}
 				},
-				onChange: () => this.markDirty(),
 				onError: (e) => {
 					console.error("[pdf-ink] open failed", e);
 					new Notice(`PDF Ink couldn't open ${file.name}: ${e.message}`);
 				},
-				onSettingsChange: () => void this.plugin.saveSettings(),
 			});
 			this.unmount = mounted.unmount;
-			this.refresh = mounted.refresh;
 		} catch (e: any) {
 			console.error("[pdf-ink] open failed", e);
 			new Notice(`PDF Ink couldn't open ${file.name}: ${e?.message ?? e}`);
 		}
 	}
+
+	private linkVars(file: TFile, page: number, rect: string, text: string, color: string): LinkVars {
+		const sidecar = this.plugin.settings.sidecarFolder ? `${this.plugin.settings.sidecarFolder}/x.md` : file.path;
+		return { file: this.app.metadataCache.fileToLinktext(file, sidecar), path: file.path, page, rect, text, color };
+	}
+
+	private backlinks(file: TFile): Backlink[] {
+		if (!this.plugin.settings.showBacklinks) return [];
+		try {
+			const links = collectBacklinks(this.app, file);
+			this.backlinkSources = new Set(links.map((l) => l.sourcePath));
+			return links;
+		} catch (e) {
+			console.warn("[pdf-ink] backlinks", e);
+			return [];
+		}
+	}
+
+	// ------------------------------------------------------------------ saving
 
 	private markDirty() {
 		this.dirty = true;

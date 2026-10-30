@@ -1,5 +1,5 @@
 // Just enough of the Obsidian API for the browser harness.
-const P = HTMLElement.prototype as any;
+const P: any = typeof HTMLElement === "undefined" ? {} : HTMLElement.prototype;
 P.createEl = function (tag: string, o?: any) {
 	const el = document.createElement(tag);
 	if (o?.cls) el.className = o.cls;
@@ -61,11 +61,14 @@ export class FileView {
 	file: TFile | null = null;
 	scope: any;
 	contentEl: HTMLElement;
+	containerEl: HTMLElement;
 	constructor(leaf: any) {
 		this.leaf = leaf;
 		this.app = leaf.app;
 		this.contentEl = document.getElementById("content")!;
+		this.containerEl = document.getElementById("leaf")!;
 	}
+	setEphemeralState(_s: any) {}
 	registerEvent() {}
 	// Obsidian's View owns open()/close() and calls onOpen()/onClose() from them;
 	// a plugin view must not define methods with these names.
@@ -95,3 +98,11 @@ export function debounce(fn: any, ms: number) {
 	d.cancel = () => clearTimeout(t);
 	return d;
 }
+export class TFolder {
+	path = "";
+}
+export class MarkdownView {
+	file: TFile | null = null;
+	editor: any = null;
+}
+export class Notice2 {}

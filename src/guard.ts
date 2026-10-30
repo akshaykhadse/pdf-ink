@@ -1,72 +1,38 @@
 /**
- * Stylus handling on top of EmbedPDF's tools: palm rejection, finger
- * scrolling while a pen tool is active, and the eraser.
+ * Pointer handling that EmbedPDF does not do itself (none of this is native):
  *
- * EmbedPDF's tools draw with any pointer type on page layers that have
- * `touch-action: none`, so a finger or a resting palm would draw and could not
- * scroll. This guard listens on the viewer root in the capture phase, before
- * any tool: while a tool is active it stops finger pointer events and scrolls
- * the viewport itself. EmbedPDF's two-finger pinch keeps working because it
- * listens to touch events, which are left alone.
- *
- * The eraser is also handled here: pen and mouse events are stopped before the
- * tools see them and matched against the annotations of the page under the
- * pointer.
+ *  - Stylus mode: while a drawing tool is active, fingers are kept from
+ *    EmbedPDF and scroll the viewport instead (one finger scrolls with a
+ *    fling, two fingers reach EmbedPDF's pinch zoom, which listens to touch
+ *    events and is left alone).
+ *  - The eraser: pen and mouse events are intercepted and matched against the
+ *    annotations of the page under the pointer. A pen's side button while
+ *    hovering arms the eraser for one stroke.
+ *  - Full pen sample rate: browsers deliver one pointermove per frame and fold
+ *    the rest into getCoalescedEvents(); EmbedPDF reads only the event itself,
+ *    so the folded samples are re-dispatched ahead of it.
+ *  - Android reports the pen as touch events too, and Obsidian's edge swipe
+ *    (which opens the side panels) listens to those: the pen's own touch
+ *    events are stopped while it is on the page.
+ *  - A stale DOM text selection would start a native drag on the next pen-down
+ *    and swallow the stroke: dragstart is blocked.
  */
 import type { Settings } from "./settings";
-
-export interface GuardOptions {
-	documentId: string;
-	settings(): Settings;
-	onErased(): void;
-	onEraserChange(active: boolean): void;
-}
+import type { ToolController } from "./tools";
 
 interface PagePoint {
 	pageIndex: number;
-	/** In PDF points from the page's top-left corner. */
+	/** PDF points from the page's top-left corner (EmbedPDF's page space). */
 	x: number;
 	y: number;
 	/** Rendered pixels per PDF point. */
 	scale: number;
 }
 
-interface Stroke {
-	points: { x: number; y: number }[];
-}
-
-/** PdfAnnotationSubtype.INK: the eraser only ever removes ink (never links, forms, notes). */
 const INK = 15;
 const HIGHLIGHT = 9;
-
-/** Whether an ink annotation is within `radius` page units of the point. */
-export function annotationHit(a: any, x: number, y: number, radius: number): boolean {
-	if (a?.type === HIGHLIGHT) {
-		// A text highlight: hit when the eraser touches one of its line boxes.
-		const boxes: any[] = Array.isArray(a.segmentRects) && a.segmentRects.length ? a.segmentRects : a.rect ? [a.rect] : [];
-		return boxes.some((b) => {
-			const o = b?.origin, sz = b?.size;
-			if (!o || !sz) return false;
-			return x >= o.x - radius && x <= o.x + sz.width + radius && y >= o.y - radius && y <= o.y + sz.height + radius;
-		});
-	}
-	if (a?.type !== INK) return false;
-	const inkList: Stroke[] | undefined = a?.inkList;
-	if (!Array.isArray(inkList)) return false;
-	const r = radius + (a.strokeWidth ?? 1) / 2;
-	for (const stroke of inkList) {
-		const pts = stroke?.points ?? [];
-		if (pts.length === 1 && Math.hypot(pts[0].x - x, pts[0].y - y) <= r) return true;
-		for (let i = 1; i < pts.length; i++) {
-			if (segmentDistance(x, y, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y) <= r) return true;
-		}
-	}
-	return false;
-}
-
 /** A touch this close to the pen's contact point (CSS px) is the pen itself. */
 const PEN_TOUCH_RADIUS = 48;
-
 /** Pen buttons that mean "erase": primary while hovering (S Pen), barrel (2) or eraser end (32). */
 const ERASER_BUTTONS = 1 | 2 | 32;
 
@@ -77,11 +43,27 @@ function segmentDistance(px: number, py: number, ax: number, ay: number, bx: num
 	return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
+/** Whether an ink stroke or text highlight is within `radius` page units of the point. */
+export function annotationHit(a: any, x: number, y: number, radius: number): boolean {
+	if (a?.type === HIGHLIGHT) {
+		const boxes: any[] = Array.isArray(a.segmentRects) && a.segmentRects.length ? a.segmentRects : a.rect ? [a.rect] : [];
+		return boxes.some((b) => {
+			const o = b?.origin, sz = b?.size;
+			if (!o || !sz) return false;
+			return x >= o.x - radius && x <= o.x + sz.width + radius && y >= o.y - radius && y <= o.y + sz.height + radius;
+		});
+	}
+	if (a?.type !== INK || !Array.isArray(a.inkList)) return false;
+	const r = radius + (a.strokeWidth ?? 1) / 2;
+	for (const stroke of a.inkList) {
+		const pts = stroke?.points ?? [];
+		if (pts.length === 1 && Math.hypot(pts[0].x - x, pts[0].y - y) <= r) return true;
+		for (let i = 1; i < pts.length; i++) if (segmentDistance(x, y, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y) <= r) return true;
+	}
+	return false;
+}
+
 export class PointerGuard {
-	/** The eraser picked on the toolbar; stays on until switched off. */
-	private eraser = false;
-	/** The eraser armed by the pen's side button; lasts one stroke. */
-	private penEraser = false;
 	private readonly cursor: HTMLElement;
 	private readonly off: (() => void)[] = [];
 	/** Fingers whose events are kept from EmbedPDF (decided when they land). */
@@ -92,10 +74,18 @@ export class PointerGuard {
 	/** Pens and mice that are down, with whether the eraser owns them. */
 	private readonly pens = new Map<number, boolean>();
 	private erasing: { id: number; last: PagePoint | null } | null = null;
-	/** Set by the viewer once EmbedPDF's registry is known. */
-	registry: any = null;
+	/** Where the pen last touched the page, while it is down. */
+	private penAt: { id: number; x: number; y: number } | null = null;
+	/** True while the coalesced samples of a move are being re-dispatched. */
+	private replaying = false;
+	/** How each active touch was classified when it landed (stylus mode may change mid-touch). */
+	private readonly kinds = new Map<number, "finger" | "pen">();
+	/** What the current eraser stroke has removed, recorded as one undo step when it ends. */
+	private erased: any[] = [];
+	private readonly win: Window;
 
-	constructor(private readonly root: HTMLElement, private readonly o: GuardOptions) {
+	constructor(private readonly root: HTMLElement, private readonly tools: ToolController, private readonly settings: () => Settings, private readonly onErased: () => void) {
+		this.win = root.ownerDocument.defaultView ?? window;
 		this.cursor = root.ownerDocument.createElement("div");
 		this.cursor.className = "pdf-ink-eraser-cursor";
 		this.cursor.hidden = true;
@@ -107,32 +97,29 @@ export class PointerGuard {
 		};
 		on("pointerdown", (e) => this.onDown(e));
 		on("pointermove", (e) => this.onMove(e));
-		// A stale DOM text selection (left by selecting text to highlight it) would
-		// otherwise start a native drag on the next pen-down, which cancels the
-		// pointer and swallows the stroke.
-		root.addEventListener("dragstart", (e) => e.preventDefault(), true);
 		on("pointerup", (e) => this.onUp(e));
 		on("pointercancel", (e) => this.onUp(e));
 		on("pointerleave", (e) => {
 			if (e.pointerType !== "touch" && !this.erasing) this.cursor.hidden = true;
 		});
-		// A release outside the viewer (over the toolbar, another pane) still ends
-		// the pointer. Bubble phase, so the root's capture handlers run first.
+		const noDrag = (e: Event) => e.preventDefault();
+		root.addEventListener("dragstart", noDrag, true);
+		this.off.push(() => root.removeEventListener("dragstart", noDrag, true));
+		// A release outside the viewer still ends the pointer (bubble phase: the root's capture handlers ran first).
 		const forget = (e: Event) => this.forget(e as PointerEvent);
-		window.addEventListener("pointerup", forget);
-		window.addEventListener("pointercancel", forget);
-		// Android also reports the pen as touch events, and Obsidian's edge-swipe
-		// gesture (which opens the side panels) listens to those. While a pen is
-		// on the page, the touch events at the pen's position go no further.
-		// Fingers are left alone so EmbedPDF's two-finger pinch keeps working.
+		const win = this.win;
+		win.addEventListener("pointerup", forget);
+		win.addEventListener("pointercancel", forget);
 		const penTouch = (e: Event) => this.blockPenTouch(e as TouchEvent);
 		const touchTypes = ["touchstart", "touchmove", "touchend", "touchcancel"];
-		for (const t of touchTypes) window.addEventListener(t, penTouch, { capture: true, passive: false });
+		for (const t of touchTypes) win.addEventListener(t, penTouch, { capture: true, passive: false });
 		this.off.push(() => {
-			window.removeEventListener("pointerup", forget);
-			window.removeEventListener("pointercancel", forget);
-			for (const t of touchTypes) window.removeEventListener(t, penTouch, true);
+			win.removeEventListener("pointerup", forget);
+			win.removeEventListener("pointercancel", forget);
+			for (const t of touchTypes) win.removeEventListener(t, penTouch, true);
 		});
+		this.off.push(tools.subscribe(() => this.sync()));
+		this.sync();
 	}
 
 	destroy() {
@@ -142,56 +129,22 @@ export class PointerGuard {
 		this.cursor.remove();
 	}
 
-	get eraserActive() {
-		return this.eraser || this.penEraser;
-	}
-
-	setEraser(on: boolean) {
-		const was = this.eraserActive;
-		this.eraser = on;
-		this.penEraser = false;
-		if (was === this.eraserActive) return;
-		this.announce();
-	}
-
-	/** Re-checks what fingers must be kept from; call after the active tool changes. */
+	/** Re-applies the touch policy classes; runs whenever the tool state changes. */
 	sync() {
 		this.root.classList.toggle("is-guarding", this.blockingFingers());
-		// Stylus mode off with a tool active: fingers draw, so pages must not pan natively.
-		const touchDraws = !this.o.settings().palmRejection && (this.eraserActive || this.activeTool() !== null);
-		this.root.classList.toggle("is-touch-draw", touchDraws);
-	}
-
-	private announce() {
-		if (!this.eraserActive) this.cursor.hidden = true;
-		// The toolbar's eraser replaces the tool; the pen's side button only
-		// borrows one stroke, so the tool stays picked (its events are stopped anyway).
-		if (this.eraser) this.annotations()?.setActiveTool?.(null);
-		this.o.onEraserChange(this.eraserActive);
-		this.sync();
+		// Stylus mode off with a drawing tool: fingers draw, so pages must not scroll natively.
+		this.root.classList.toggle("is-touch-draw", !this.tools.stylusMode && this.tools.drawing);
+		if (!this.eraserActive()) this.cursor.hidden = true;
 	}
 
 	// ----------------------------------------------------------------- helpers
 
-	private registryOf(): any {
-		if (!this.registry) {
-			// The viewer sets `registry` once EmbedPDF is up; until then nothing to do.
-			return null;
-		}
-		return this.registry;
-	}
-
-	private annotations(): any {
-		return this.registryOf()?.getPlugin("annotation")?.provides()?.forDocument(this.o.documentId) ?? null;
-	}
-
-	private activeTool(): string | null {
-		return this.annotations()?.getActiveTool?.()?.id ?? null;
+	private eraserActive() {
+		return this.tools.tool === "eraser" || this.tools.penEraser;
 	}
 
 	private blockingFingers(): boolean {
-		if (!this.o.settings().palmRejection) return false;
-		return this.eraserActive || this.pens.size > 0 || this.activeTool() !== null;
+		return this.tools.stylusMode && (this.tools.drawing || this.pens.size > 0);
 	}
 
 	/** The scrolling viewport under a point, or null over the toolbar. */
@@ -208,14 +161,11 @@ export class PointerGuard {
 		const el = this.root.ownerDocument.elementsFromPoint(clientX, clientY).find((e) => this.root.contains(e) && (e as HTMLElement).closest(".pdf-ink-page"));
 		const page = (el as HTMLElement | undefined)?.closest(".pdf-ink-page") as HTMLElement | null;
 		if (!page) return null;
-		const scale: number | undefined = this.registryOf()?.getPlugin("zoom")?.provides()?.forDocument(this.o.documentId)?.getState()?.currentZoomLevel;
+		const scale: number | undefined = this.tools.registry?.getPlugin("zoom")?.provides()?.forDocument(this.tools.documentId)?.getState()?.currentZoomLevel;
 		if (!scale) return null;
 		const rect = page.getBoundingClientRect();
 		return { pageIndex: Number(page.dataset.pageIndex), x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale, scale };
 	}
-
-	/** Where the pen last touched the page, while it is down. */
-	private penAt: { id: number; x: number; y: number } | null = null;
 
 	private blockPenTouch(e: TouchEvent) {
 		const pen = this.penAt;
@@ -229,43 +179,60 @@ export class PointerGuard {
 		}
 	}
 
-	/** In stylus mode fingers scroll; otherwise a touch is treated like a pen. */
+	/**
+	 * In stylus mode a touch is a finger; otherwise it is treated like a pen.
+	 * Decided once when the touch lands, so a stylus-mode toggle mid-touch cannot strand it.
+	 */
 	private isFinger(e: PointerEvent): boolean {
-		return e.pointerType === "touch" && (this.o.settings().palmRejection || this.fingers.has(e.pointerId));
+		if (e.pointerType !== "touch") return false;
+		const known = this.kinds.get(e.pointerId);
+		if (known) return known === "finger";
+		return this.tools.stylusMode;
 	}
 
 	private forget(e: PointerEvent) {
-		if (this.isFinger(e)) {
+		const finger = this.isFinger(e);
+		this.kinds.delete(e.pointerId);
+		if (finger) {
 			this.fingers.delete(e.pointerId);
 			this.blocked.delete(e.pointerId);
 			if (this.scroller?.id === e.pointerId) this.scroller = null;
 		} else {
 			this.pens.delete(e.pointerId);
-			if (this.erasing?.id === e.pointerId) this.erasing = null;
+			if (this.erasing?.id === e.pointerId) this.endEraserStroke();
 			if (this.penAt?.id === e.pointerId) this.penAt = null;
 		}
 		if (this.pens.size === 0 && this.fingers.size === 0) this.sync();
 	}
 
+	private endEraserStroke() {
+		this.erasing = null;
+		const erased = this.erased;
+		this.erased = [];
+		if (erased.length) this.tools.recordDeletion(erased);
+	}
+
 	// ------------------------------------------------------------------ events
 
 	private onDown(e: PointerEvent) {
+		if (e.pointerType === "touch") this.kinds.set(e.pointerId, this.tools.stylusMode ? "finger" : "pen");
 		if (this.isFinger(e)) {
 			this.fingers.add(e.pointerId);
 			if (!this.blockingFingers()) return;
 			this.blocked.add(e.pointerId);
 			e.stopPropagation();
 			this.fling = 0;
-			if (this.fingers.size === 1) {
+			if (this.pens.size > 0) {
+				this.scroller = null; // a palm landing while the pen writes must not drag the page
+			} else if (this.fingers.size === 1) {
 				const el = this.viewportAt(e.clientX, e.clientY);
 				this.scroller = el ? { id: e.pointerId, x: e.clientX, y: e.clientY, vx: 0, vy: 0, t: e.timeStamp, el } : null;
 			} else {
-				// A second finger: EmbedPDF's pinch (touch events) takes over.
-				this.scroller = null;
+				this.scroller = null; // a second finger: EmbedPDF's pinch takes over
 			}
 			return;
 		}
-		const intercept = this.eraserActive && this.viewportAt(e.clientX, e.clientY) !== null;
+		const intercept = this.eraserActive() && this.viewportAt(e.clientX, e.clientY) !== null;
 		this.pens.set(e.pointerId, intercept);
 		if (e.pointerType === "pen") {
 			if (this.viewportAt(e.clientX, e.clientY)) this.penAt = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -280,23 +247,16 @@ export class PointerGuard {
 			/* synthetic events have no active pointer */
 		}
 		this.erasing = { id: e.pointerId, last: null };
+		this.erased = [];
 		this.showCursor(e);
 		this.eraseAt(e.clientX, e.clientY);
 	}
 
-	/** True while the coalesced samples of a move are being re-dispatched. */
-	private replaying = false;
-
-	/**
-	 * Browsers deliver one pointermove per frame and fold the pen's faster
-	 * samples into getCoalescedEvents(); EmbedPDF reads only the event itself.
-	 * While a tool is drawing, the folded samples are dispatched to the same
-	 * target ahead of the real event so the stroke gets every sample.
-	 */
 	private replayCoalesced(e: PointerEvent) {
 		if (this.replaying || !e.isTrusted || typeof e.getCoalescedEvents !== "function") return;
-		if (!this.o.settings().fullPenRate) return;
-		if (this.activeTool() === null || !(e.target instanceof Element)) return;
+		if (!this.settings().fullPenRate) return;
+		const tool = this.tools.tool;
+		if ((tool !== "pen" && tool !== "marker") || !(e.target instanceof Element)) return;
 		const events = e.getCoalescedEvents();
 		if (events.length < 2) return;
 		this.replaying = true;
@@ -320,10 +280,6 @@ export class PointerGuard {
 						pressure: c.pressure,
 						tiltX: c.tiltX,
 						tiltY: c.tiltY,
-						ctrlKey: e.ctrlKey,
-						shiftKey: e.shiftKey,
-						altKey: e.altKey,
-						metaKey: e.metaKey,
 					})
 				);
 			}
@@ -357,18 +313,11 @@ export class PointerGuard {
 			this.penAt.x = e.clientX;
 			this.penAt.y = e.clientY;
 		}
-		if (e.pointerType === "pen" && !down) {
-			// A pen's side button while hovering: buttons pressed with no pointerdown
-			// and no pressure. It arms the eraser for the next stroke; letting go
-			// of the button before touching down disarms it again.
+		if (e.pointerType === "pen" && !down && this.tools.drawing) {
+			// Side button while hovering: buttons pressed, no pointerdown, no pressure.
 			const pressed = (e.buttons & ERASER_BUTTONS) !== 0 && e.pressure === 0;
-			if (pressed && !this.eraserActive) {
-				this.penEraser = true;
-				this.announce();
-			} else if (!pressed && this.penEraser && e.buttons === 0) {
-				this.penEraser = false;
-				this.announce();
-			}
+			if (pressed && !this.eraserActive()) this.tools.setPenEraser(true);
+			else if (!pressed && this.tools.penEraser && e.buttons === 0) this.tools.setPenEraser(false);
 		}
 		if (down) {
 			if (!this.pens.get(e.pointerId)) {
@@ -382,7 +331,7 @@ export class PointerGuard {
 			for (const c of events.length ? events : [e]) this.eraseAt(c.clientX, c.clientY);
 			return;
 		}
-		if (!this.eraserActive) return;
+		if (!this.eraserActive()) return;
 		if (this.viewportAt(e.clientX, e.clientY)) {
 			e.stopPropagation();
 			this.showCursor(e);
@@ -407,11 +356,7 @@ export class PointerGuard {
 		if (!intercepted) return;
 		e.stopPropagation();
 		e.preventDefault();
-		if (this.penEraser && wasPen) {
-			// The side-button eraser lasts one stroke.
-			this.penEraser = false;
-			this.announce();
-		}
+		if (this.tools.penEraser && wasPen) this.tools.setPenEraser(false); // one stroke only
 	}
 
 	private startFling(s: { vx: number; vy: number; el: HTMLElement }) {
@@ -424,15 +369,15 @@ export class PointerGuard {
 			s.el.scrollLeft -= vx;
 			vx *= 0.95;
 			vy *= 0.95;
-			if (Math.hypot(vx, vy) >= 0.5) requestAnimationFrame(step);
+			if (Math.hypot(vx, vy) >= 0.5) this.win.requestAnimationFrame(step);
 		};
-		requestAnimationFrame(step);
+		this.win.requestAnimationFrame(step);
 	}
 
 	// ------------------------------------------------------------------ eraser
 
 	private showCursor(e: PointerEvent) {
-		const size = this.o.settings().eraserSize;
+		const size = this.settings().eraserSize;
 		const r = this.root.getBoundingClientRect();
 		this.cursor.style.width = this.cursor.style.height = `${size}px`;
 		this.cursor.style.left = `${e.clientX - r.left - size / 2}px`;
@@ -442,27 +387,27 @@ export class PointerGuard {
 
 	private eraseAt(clientX: number, clientY: number) {
 		const p = this.locate(clientX, clientY);
-		const annotations = this.annotations();
+		const annotations = this.tools.annotations();
 		if (!p || !annotations) {
 			if (this.erasing) this.erasing.last = null;
 			return;
 		}
-		const radius = this.o.settings().eraserSize / 2 / p.scale;
+		const radius = this.settings().eraserSize / 2 / p.scale;
 		const last = this.erasing?.last;
 		const samples: PagePoint[] = [p];
-		// Fast moves: also test points between the last sample and this one.
 		if (last && last.pageIndex === p.pageIndex) {
 			const steps = Math.ceil(Math.hypot(p.x - last.x, p.y - last.y) / radius);
 			for (let i = 1; i < steps; i++) samples.push({ ...p, x: last.x + ((p.x - last.x) * i) / steps, y: last.y + ((p.y - last.y) * i) / steps });
 		}
 		if (this.erasing) this.erasing.last = p;
-		let count = 0;
+		const hits: { pageIndex: number; id: string }[] = [];
 		for (const tracked of annotations.getAnnotations?.({ pageIndex: p.pageIndex }) ?? []) {
 			const a = tracked?.object;
-			if (!a || !samples.some((s) => annotationHit(a, s.x, s.y, radius))) continue;
-			annotations.deleteAnnotation(p.pageIndex, a.id);
-			count++;
+			if (a && samples.some((s) => annotationHit(a, s.x, s.y, radius))) hits.push({ pageIndex: p.pageIndex, id: a.id });
 		}
-		if (count) this.o.onErased();
+		if (!hits.length) return;
+		// Deleted now for feedback; the whole stroke becomes one undo step when it ends.
+		this.erased.push(...this.tools.deleteQuietly(hits));
+		this.onErased();
 	}
 }

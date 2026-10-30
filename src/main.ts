@@ -3,20 +3,30 @@ import type { PdfEngine } from "@embedpdf/models";
 import { createPdfiumEngine } from "@embedpdf/engines/pdfium-worker-engine";
 import { DEFAULT_SETTINGS, PdfInkSettingTab, Settings, normalizeSettings } from "./settings";
 import { PdfInkView, VIEW_TYPE } from "./view";
+import { openSidecar } from "./links";
 
 export default class PdfInkPlugin extends Plugin {
 	settings: Settings = { ...DEFAULT_SETTINGS };
 	/** One PDFium worker for every open view; created when the first PDF opens. */
 	private engine: Promise<PdfEngine> | null = null;
 	private wasmUrl: string | null = null;
+	/** Set when this plugin currently owns the .pdf extension in Obsidian's view registry. */
+	private ownsPdfExtension = false;
+	/** The view type that owned .pdf before this plugin took it (normally Obsidian's "pdf"). */
+	private previousPdfView = "pdf";
 
 	async onload() {
 		this.settings = normalizeSettings(await this.loadData());
 		this.addSettingTab(new PdfInkSettingTab(this.app, this));
-
 		this.registerView(VIEW_TYPE, (leaf) => new PdfInkView(leaf, this));
 		this.applyOpenByDefault();
 
+		const withView = (fn: (view: PdfInkView) => void) => (checking: boolean) => {
+			const view = this.app.workspace.getActiveViewOfType(PdfInkView);
+			if (!view) return false;
+			if (!checking) fn(view);
+			return true;
+		};
 		this.addCommand({
 			id: "open-with-pdf-ink",
 			name: "Open current PDF in PDF Ink",
@@ -27,36 +37,31 @@ export default class PdfInkPlugin extends Plugin {
 				return true;
 			},
 		});
+		this.addCommand({ id: "save-annotations", name: "Save annotations into the PDF", checkCallback: withView((v) => void v.saveNow(true)) });
+		this.addCommand({ id: "toggle-fullscreen", name: "Toggle full screen", checkCallback: withView((v) => v.setFullscreen(!v.isFullscreen())) });
 		this.addCommand({
-			id: "save-annotations",
-			name: "Save annotations into the PDF",
-			checkCallback: (checking) => {
-				const view = this.app.workspace.getActiveViewOfType(PdfInkView);
-				if (!view) return false;
-				if (!checking) void view.saveNow(true);
-				return true;
-			},
+			id: "open-sidecar",
+			name: "Open sidecar note",
+			checkCallback: withView((v) => {
+				if (v.file) void openSidecar(this.app, this.settings, v.file, v.leaf).catch((e) => new Notice(`PDF Ink: ${e?.message ?? e}`));
+			}),
 		});
+		this.addCommand({ id: "toggle-stylus-mode", name: "Toggle stylus mode", checkCallback: withView((v) => (v as any).handle?.tools.setStylusMode(!this.settings.stylusMode)) });
 
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu: Menu, file) => {
 				if (!(file instanceof TFile) || file.extension !== "pdf") return;
-				menu.addItem((item) =>
-					item
-						.setTitle("Open in PDF Ink")
-						.setIcon("pen-tool")
-						.onClick(() => void this.openInInk(file))
-				);
+				menu.addItem((item) => item.setTitle("Open in PDF Ink").setIcon("pen-tool").onClick(() => void this.openInInk(file)));
 			})
 		);
 	}
 
 	async onunload() {
 		// Save what the open views hold before the engine goes away.
+		// Views are flushed but not detached: Obsidian keeps the leaves and restores them when the plugin reloads.
 		const views = this.app.workspace.getLeavesOfType(VIEW_TYPE);
 		const timeout = new Promise<void>((r) => setTimeout(r, 4000));
 		await Promise.race([Promise.all(views.map((leaf) => (leaf.view as PdfInkView).flush().catch(() => {}))), timeout]);
-		for (const leaf of views) leaf.detach();
 		const enginePromise = this.engine;
 		this.engine = null;
 		const engine = await Promise.race([enginePromise?.catch(() => null), timeout]);
@@ -68,10 +73,8 @@ export default class PdfInkPlugin extends Plugin {
 		if (this.wasmUrl) URL.revokeObjectURL(this.wasmUrl);
 		this.wasmUrl = null;
 		this.restorePdfExtension();
+		document.body.removeClass("pdf-ink-fullscreen-active", "pdf-ink-fullscreen-hide-chrome");
 	}
-
-	/** Set when this plugin currently owns the .pdf extension in Obsidian's view registry. */
-	private ownsPdfExtension = false;
 
 	/**
 	 * Makes .pdf files open here instead of the built-in viewer. Obsidian's own
@@ -83,6 +86,8 @@ export default class PdfInkPlugin extends Plugin {
 		if (!registry?.unregisterExtensions || !registry?.registerExtensions) return;
 		try {
 			if (this.settings.openByDefault && !this.ownsPdfExtension) {
+				const current = registry.typeByExtension?.pdf;
+				if (typeof current === "string" && current !== VIEW_TYPE) this.previousPdfView = current;
 				registry.unregisterExtensions(["pdf"]);
 				registry.registerExtensions(["pdf"], VIEW_TYPE);
 				this.ownsPdfExtension = true;
@@ -101,14 +106,16 @@ export default class PdfInkPlugin extends Plugin {
 		try {
 			const registry = (this.app as any).viewRegistry;
 			registry.unregisterExtensions(["pdf"]);
-			registry.registerExtensions(["pdf"], "pdf");
+			registry.registerExtensions(["pdf"], this.previousPdfView);
 		} catch (e) {
 			console.warn("[pdf-ink] could not restore the PDF view", e);
 		}
 	}
 
-	async saveSettings() {
+	/** Persists the settings; `fromTab` pushes them into the open viewers too. */
+	async saveSettings(fromTab = true) {
 		await this.saveData(this.settings);
+		if (!fromTab) return;
 		this.applyOpenByDefault();
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) (leaf.view as PdfInkView).settingsChanged();
 	}

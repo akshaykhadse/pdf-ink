@@ -109,6 +109,7 @@ export function installInkSmoothing(annotationPlugin: any, enabled: () => boolea
 	const original = annotationPlugin.createAnnotation;
 	if (typeof original !== "function") return;
 	annotationPlugin.__pdfInkSmoothing = enabled;
+	annotationPlugin.__pdfInkRawCreate = original;
 	annotationPlugin.createAnnotation = function (pageIndex: number, annotation: any, ...rest: unknown[]) {
 		const on = annotationPlugin.__pdfInkSmoothing;
 		return original.call(this, pageIndex, on() ? smoothInkAnnotation(annotation) : annotation, ...rest);
