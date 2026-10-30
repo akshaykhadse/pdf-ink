@@ -83,7 +83,7 @@ export class PdfInkSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Open PDFs with PDF Ink")
-			.setDesc("Every PDF in the vault opens in this viewer. Takes effect after a reload. Off: use the file menu or the command.")
+			.setDesc("Every PDF in the vault opens in this viewer (already open tabs keep their viewer). Off: use the file menu or the command.")
 			.addToggle((t) =>
 				t.setValue(s.openByDefault).onChange(async (v) => {
 					s.openByDefault = v;

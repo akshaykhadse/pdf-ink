@@ -15,7 +15,7 @@ export default class PdfInkPlugin extends Plugin {
 		this.addSettingTab(new PdfInkSettingTab(this.app, this));
 
 		this.registerView(VIEW_TYPE, (leaf) => new PdfInkView(leaf, this));
-		if (this.settings.openByDefault) this.registerExtensions(["pdf"], VIEW_TYPE);
+		this.applyOpenByDefault();
 
 		this.addCommand({
 			id: "open-with-pdf-ink",
@@ -67,18 +67,49 @@ export default class PdfInkPlugin extends Plugin {
 		}
 		if (this.wasmUrl) URL.revokeObjectURL(this.wasmUrl);
 		this.wasmUrl = null;
-		// Hand .pdf back to Obsidian's own viewer (unregistering leaves it with no view at all).
-		if (this.settings.openByDefault) {
-			try {
-				(this.app as any).viewRegistry?.registerExtensions?.(["pdf"], "pdf");
-			} catch (e) {
-				console.warn("[pdf-ink] could not restore the PDF view", e);
+		this.restorePdfExtension();
+	}
+
+	/** Set when this plugin currently owns the .pdf extension in Obsidian's view registry. */
+	private ownsPdfExtension = false;
+
+	/**
+	 * Makes .pdf files open here instead of the built-in viewer. Obsidian's own
+	 * registerExtensions throws when the extension is already taken (and "pdf"
+	 * always is, by the core viewer), so the registry is swapped by hand.
+	 */
+	applyOpenByDefault() {
+		const registry = (this.app as any).viewRegistry;
+		if (!registry?.unregisterExtensions || !registry?.registerExtensions) return;
+		try {
+			if (this.settings.openByDefault && !this.ownsPdfExtension) {
+				registry.unregisterExtensions(["pdf"]);
+				registry.registerExtensions(["pdf"], VIEW_TYPE);
+				this.ownsPdfExtension = true;
+			} else if (!this.settings.openByDefault) {
+				this.restorePdfExtension();
 			}
+		} catch (e) {
+			console.warn("[pdf-ink] could not change the .pdf view", e);
+		}
+	}
+
+	/** Hands .pdf back to Obsidian's own viewer (unregistering alone leaves it with no view at all). */
+	private restorePdfExtension() {
+		if (!this.ownsPdfExtension) return;
+		this.ownsPdfExtension = false;
+		try {
+			const registry = (this.app as any).viewRegistry;
+			registry.unregisterExtensions(["pdf"]);
+			registry.registerExtensions(["pdf"], "pdf");
+		} catch (e) {
+			console.warn("[pdf-ink] could not restore the PDF view", e);
 		}
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		this.applyOpenByDefault();
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) (leaf.view as PdfInkView).settingsChanged();
 	}
 
