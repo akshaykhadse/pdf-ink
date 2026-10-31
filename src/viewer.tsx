@@ -113,7 +113,8 @@ function App(props: ViewerProps) {
 				tools: [
 					ink("ink", s.pen),
 					ink("inkHighlighter", s.marker),
-					{ id: "highlight", defaults: { strokeColor: s.textHighlight.color, color: s.textHighlight.color, opacity: s.textHighlight.opacity } },
+					// exclusive as well: a tap on an existing highlight or stroke must not select it while highlighting.
+					{ id: "highlight", defaults: { strokeColor: s.textHighlight.color, color: s.textHighlight.color, opacity: s.textHighlight.opacity }, interaction: { exclusive: true } },
 				] as any,
 			}),
 			createPluginRegistration(CapturePluginPackage, { scale: 2, imageType: "image/png", withAnnotations: true }),

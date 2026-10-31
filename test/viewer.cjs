@@ -335,6 +335,10 @@ const files = {
 	await drag(textX0, textY, textX1, textY, 8, 600);
 	const th = await api(`(() => { const o = ann.getAnnotations().at(-1).object; return [o.type, o.color, o.segmentRects?.length, ann.getAnnotations().length]; })()`);
 	check("the text highlighter highlights the selected text in its colour", th[0] === 9 && th[1] === "#8ce99a" && th[2] >= 1 && th[3] === 5, JSON.stringify(th));
+	// Still in the text highlighter: a click on the highlight just made must not select it.
+	await page.mouse.click((textX0 + textX1) / 2, textY);
+	await page.waitForTimeout(200);
+	check("the text highlighter does not select an existing highlight on click", (await api(`ann.getSelectedAnnotations().length`)) === 0 && (await api(`tools.tool`)) === "textHighlight", `selected ${await api(`ann.getSelectedAnnotations().length`)}`);
 
 	// --- eraser
 	await tool("eraser");
@@ -389,6 +393,16 @@ const files = {
 	await page.waitForTimeout(100);
 	await fingerSwipe(x, y + 300, 100, 10);
 	check("stylus mode off: a finger draws", (await count()) === before + 1 && (await page.evaluate(() => window.settings.stylusMode)) === false, `annotations ${await count()}`);
+	const z3 = await api(`zoom.getState().currentZoomLevel`);
+	const n2b = await count();
+	await touch("touchStart", [[x - 50, y + 300], [x + 50, y + 300]]);
+	for (let i = 1; i <= 8; i++) {
+		await touch("touchMove", [[x - 50 - i * 10, y + 300], [x + 50 + i * 10, y + 300]]);
+		await page.waitForTimeout(16);
+	}
+	await touch("touchEnd", []);
+	await page.waitForTimeout(500);
+	check("stylus mode off: with the pen tool two fingers do not pinch", Math.abs((await api(`zoom.getState().currentZoomLevel`)) - z3) < 0.01, `zoom ${z3} -> ${await api(`zoom.getState().currentZoomLevel`)}, annotations ${n2b} -> ${await count()}`);
 	await click(".pdf-ink-stylus");
 	await page.waitForTimeout(100);
 

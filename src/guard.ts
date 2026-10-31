@@ -172,8 +172,8 @@ export class PointerGuard {
 	}
 
 	private blockPenTouch(e: TouchEvent) {
-		// Stylus mode off with the pointer tool: fingers select, so two fingers must not pinch either.
-		if (!this.tools.stylusMode && this.tools.tool === "pointer" && e.touches.length > 1 && this.root.contains(e.target as Node)) {
+		// Stylus mode off with the pointer or a drawing tool: fingers act on the page, so two fingers must not pinch either.
+		if (!this.tools.stylusMode && this.tools.penOnly && e.touches.length > 1 && this.root.contains(e.target as Node)) {
 			e.stopImmediatePropagation();
 			return;
 		}
