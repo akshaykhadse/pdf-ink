@@ -535,6 +535,20 @@ const files = {
 	await drag(mid[0] + 40, mid[1] - 30, mid[0] + 40, mid[1] + 60, 8, 300);
 	check("the eraser finds the right page deep in a long document", deep.length === 1 && deep[0] >= 9 && (await count()) === 0 && Number(pageInput) >= 10 && Number(pageInput) <= 13, `stroke on ${JSON.stringify(deep)}, page ${pageInput}, left ${await count()}`);
 
+	// --- the reading position is remembered per file (plugin addition) and restored on reopen
+	await setScroll((await scrollTop()) + 137);
+	await page.waitForTimeout(1200);
+	const posBefore = await page.evaluate(() => window.view.handle.position());
+	const remembered = await page.evaluate(() => window.positions[window.file.path]);
+	await page.evaluate(async () => {
+		await window.view.onUnloadFile(window.file);
+		await window.view.onLoadFile(window.file);
+	});
+	await ready();
+	await page.waitForTimeout(600);
+	const posAfter = await page.evaluate(() => window.view.handle.position());
+	check("the reading position is remembered and restored on reopen", posBefore && remembered && remembered.page === posBefore.page && posAfter && posAfter.page === posBefore.page && Math.abs(posAfter.y - posBefore.y) < 3, `before ${JSON.stringify(posBefore)}, stored ${JSON.stringify(remembered)}, after ${JSON.stringify(posAfter)}`);
+
 	await page.screenshot({ path: path.join(out, "viewer.png") });
 	await browser.close();
 	if (failed) process.exit(1);

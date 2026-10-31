@@ -1,6 +1,6 @@
 import { FileView, Notice, Scope, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import type PdfInkPlugin from "./main";
-import { ViewerHandle, mountViewer } from "./viewer";
+import { ReadingPosition, ViewerHandle, mountViewer } from "./viewer";
 import { Backlink, LinkVars, collectBacklinks, deliverLink, openBacklink, openSidecar } from "./links";
 
 export const VIEW_TYPE = "pdf-ink";
@@ -23,6 +23,8 @@ export class PdfInkView extends FileView {
 	private fullscreen = false;
 	/** A link target that arrived before the document was open. */
 	private pendingSubpath: string | null = null;
+	/** True while the remembered position is being restored after opening. */
+	private restoring = false;
 	/** Notes that linked to this PDF at the last backlink scan. */
 	private backlinkSources = new Set<string>();
 
@@ -158,7 +160,32 @@ export class PdfInkView extends FileView {
 
 	// ----------------------------------------------------------------- loading
 
+	/**
+	 * The layout settles some time after the document opens (and EmbedPDF may
+	 * scroll to the top once more): keep asking until the viewer reports the
+	 * wanted spot, correcting for the viewport gap, then leave it alone.
+	 */
+	private restoreWhenLaidOut(handle: ViewerHandle, pos: ReadingPosition, token: number) {
+		let tries = 0;
+		let y = pos.y;
+		this.restoring = true;
+		const done = () => (this.restoring = false);
+		const tick = () => {
+			if (token !== this.openToken || this.handle !== handle) return done();
+			const got = handle.position();
+			if (got && got.page === pos.page && Math.abs(got.y - pos.y) <= 1) return done();
+			if (got && got.page === pos.page && Math.abs(got.y - pos.y) < 60) y = Math.max(0, y - (got.y - pos.y));
+			handle.restore({ page: pos.page, y });
+			if (++tries < 25) setTimeout(tick, 120);
+			else done();
+		};
+		setTimeout(tick, 150);
+	}
+
 	private unmountViewer() {
+		const pos = this.restoring ? null : this.handle?.position();
+		if (pos && this.file) this.plugin.rememberPosition(this.file.path, pos);
+		this.restoring = false;
 		this.openToken++;
 		this.unmount?.();
 		this.unmount = null;
@@ -172,6 +199,9 @@ export class PdfInkView extends FileView {
 		this.openToken = token;
 		this.rootEl.empty();
 		this.rootEl.addClass("is-loading");
+		// A remembered spot: the layout's first scroll reports must not overwrite it before it is restored.
+		const remembered = this.pendingSubpath ? null : this.plugin.positionFor(file.path);
+		this.restoring = !!remembered && (remembered.page > 1 || remembered.y > 0);
 		try {
 			const [engine, bytes] = await Promise.all([this.plugin.getEngine(), this.app.vault.readBinary(file)]);
 			if (token !== this.openToken) return;
@@ -190,6 +220,8 @@ export class PdfInkView extends FileView {
 					backlinks: () => this.backlinks(file),
 					openBacklink: (link: Backlink) => void openBacklink(this.app, link, file.path),
 					openSidecar: () => void openSidecar(this.app, this.plugin.settings, file, this.leaf).catch((e) => new Notice(`PDF Ink: ${e?.message ?? e}`)),
+					// The layout's first scroll events report the top of the document: not until the old spot is restored.
+					positionChanged: (pos) => !this.restoring && this.plugin.rememberPosition(file.path, pos),
 				},
 				onReady: (handle) => {
 					if (token !== this.openToken) return;
@@ -199,15 +231,22 @@ export class PdfInkView extends FileView {
 						const sub = this.pendingSubpath;
 						this.pendingSubpath = null;
 						setTimeout(() => handle.goTo(sub), 150);
+					} else if (this.restoring && remembered) {
+						// Back to where the reader left this file (the plugin remembers it; EmbedPDF does not).
+						this.restoreWhenLaidOut(handle, remembered, token);
+					} else {
+						this.restoring = false;
 					}
 				},
 				onError: (e) => {
+					this.restoring = false;
 					console.error("[pdf-ink] open failed", e);
 					new Notice(`PDF Ink couldn't open ${file.name}: ${e.message}`);
 				},
 			});
 			this.unmount = mounted.unmount;
 		} catch (e: any) {
+			this.restoring = false;
 			console.error("[pdf-ink] open failed", e);
 			new Notice(`PDF Ink couldn't open ${file.name}: ${e?.message ?? e}`);
 		}

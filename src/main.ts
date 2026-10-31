@@ -2,6 +2,7 @@ import { Menu, Notice, Plugin, TFile, WorkspaceLeaf, normalizePath } from "obsid
 import type { PdfEngine } from "@embedpdf/models";
 import { createPdfiumEngine } from "@embedpdf/engines/pdfium-worker-engine";
 import { DEFAULT_SETTINGS, PdfInkSettingTab, Settings, normalizeSettings } from "./settings";
+import type { ReadingPosition } from "./viewer";
 import { PdfInkView, VIEW_TYPE } from "./view";
 import { openSidecar } from "./links";
 
@@ -15,8 +16,14 @@ export default class PdfInkPlugin extends Plugin {
 	/** The view type that owned .pdf before this plugin took it (normally Obsidian's "pdf"). */
 	private previousPdfView = "pdf";
 
+	/** Last reading position per PDF path, kept beside the settings in data.json. */
+	positions: Record<string, StoredPosition> = {};
+	private positionsTimer: ReturnType<typeof setTimeout> | null = null;
+
 	async onload() {
-		this.settings = normalizeSettings(await this.loadData());
+		const raw = await this.loadData();
+		this.settings = normalizeSettings(raw);
+		this.positions = readPositions(raw?.positions);
 		this.addSettingTab(new PdfInkSettingTab(this.app, this));
 		this.registerView(VIEW_TYPE, (leaf) => new PdfInkView(leaf, this));
 		this.applyOpenByDefault();
@@ -48,6 +55,22 @@ export default class PdfInkPlugin extends Plugin {
 		});
 		this.addCommand({ id: "toggle-stylus-mode", name: "Toggle stylus mode", checkCallback: withView((v) => (v as any).handle?.tools.setStylusMode(!this.settings.stylusMode)) });
 
+		this.registerEvent(
+			this.app.vault.on("rename", (file, oldPath) => {
+				const pos = this.positions[oldPath];
+				if (!pos) return;
+				delete this.positions[oldPath];
+				this.positions[file.path] = pos;
+				this.schedulePositionsSave();
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("delete", (file) => {
+				if (!this.positions[file.path]) return;
+				delete this.positions[file.path];
+				this.schedulePositionsSave();
+			})
+		);
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu: Menu, file) => {
 				if (!(file instanceof TFile) || file.extension !== "pdf") return;
@@ -112,9 +135,29 @@ export default class PdfInkPlugin extends Plugin {
 		}
 	}
 
-	/** Persists the settings; `fromTab` pushes them into the open viewers too. */
+	positionFor(path: string): ReadingPosition | null {
+		const p = this.positions[path];
+		return p ? { page: p.page, y: p.y } : null;
+	}
+
+	rememberPosition(path: string, pos: ReadingPosition) {
+		const old = this.positions[path];
+		if (old && old.page === pos.page && old.y === pos.y) return;
+		this.positions[path] = { page: pos.page, y: pos.y, at: Date.now() };
+		this.schedulePositionsSave();
+	}
+
+	private schedulePositionsSave() {
+		if (this.positionsTimer) clearTimeout(this.positionsTimer);
+		this.positionsTimer = setTimeout(() => {
+			this.positionsTimer = null;
+			void this.saveSettings(false);
+		}, 2000);
+	}
+
+	/** Persists the settings and the reading positions; `fromTab` pushes the settings into the open viewers too. */
 	async saveSettings(fromTab = true) {
-		await this.saveData(this.settings);
+		await this.saveData({ ...this.settings, positions: prunePositions(this.positions) });
 		if (!fromTab) return;
 		this.applyOpenByDefault();
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) (leaf.view as PdfInkView).settingsChanged();
@@ -155,4 +198,30 @@ export default class PdfInkPlugin extends Plugin {
 			throw e;
 		}
 	}
+}
+
+interface StoredPosition extends ReadingPosition {
+	at: number;
+}
+
+const MAX_POSITIONS = 500;
+
+function readPositions(raw: unknown): Record<string, StoredPosition> {
+	const out: Record<string, StoredPosition> = {};
+	if (!raw || typeof raw !== "object") return out;
+	for (const [path, v] of Object.entries(raw as Record<string, any>)) {
+		if (!v || typeof v !== "object") continue;
+		const page = Number(v.page), y = Number(v.y), at = Number(v.at);
+		if (!Number.isFinite(page) || page < 1 || !Number.isFinite(y)) continue;
+		out[path] = { page: Math.floor(page), y: Math.max(0, y), at: Number.isFinite(at) ? at : 0 };
+	}
+	return out;
+}
+
+/** The most recent entries only, so data.json does not grow forever. */
+function prunePositions(all: Record<string, StoredPosition>): Record<string, StoredPosition> {
+	const entries = Object.entries(all);
+	if (entries.length <= MAX_POSITIONS) return all;
+	entries.sort((a, b) => b[1].at - a[1].at);
+	return Object.fromEntries(entries.slice(0, MAX_POSITIONS));
 }

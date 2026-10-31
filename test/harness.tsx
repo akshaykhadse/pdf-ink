@@ -13,6 +13,7 @@ declare global {
 		handlers: Record<string, any>;
 		currentBytes?: Uint8Array;
 		settings: any;
+		positions: any;
 		clipboard: string[];
 		notes: Record<string, string>;
 		links: any[];
@@ -74,7 +75,8 @@ window.run = async (pdfUrl = "/sample.pdf") => {
 		const url = URL.createObjectURL(new Blob([wasm], { type: "application/wasm" }));
 		return createPdfiumEngine(url, { fontFallback: null });
 	})();
-	const plugin = { settings: window.settings, saveSettings: async () => {}, getEngine: () => enginePromise };
+	window.positions ??= {};
+	const plugin = { settings: window.settings, saveSettings: async () => {}, getEngine: () => enginePromise, positionFor: (p: string) => window.positions[p] ?? null, rememberPosition: (p: string, pos: any) => (window.positions[p] = pos) };
 	const leaf: any = { app };
 	const view = new PdfInkView(leaf, plugin as any);
 	(view as any).file = file;

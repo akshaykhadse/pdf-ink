@@ -44,6 +44,14 @@ export interface ViewerHost {
 	backlinks(): Backlink[];
 	openBacklink(link: Backlink): void;
 	openSidecar(): void;
+	/** The reading position moved (throttled); the host remembers it per file. */
+	positionChanged(pos: ReadingPosition): void;
+}
+
+/** Where the reader is: the topmost visible page and the offset into it in PDF points. */
+export interface ReadingPosition {
+	page: number;
+	y: number;
 }
 
 /** What the Obsidian view gets once a document is open. */
@@ -59,6 +67,10 @@ export interface ViewerHandle {
 	goTo(subpath: string): void;
 	/** Backlinks changed (a note was edited). */
 	refreshBacklinks(): void;
+	/** The current reading position, or null before the layout exists. */
+	position(): ReadingPosition | null;
+	/** Scrolls back to a remembered position without animation. */
+	restore(pos: ReadingPosition): void;
 }
 
 export interface ViewerProps {
@@ -195,6 +207,24 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		const offCapture = capture?.onCaptureArea?.((e: any) => setArea({ pageIndex: e.pageIndex, rect: toRect(e.rect) }));
 		const offTools = tools.subscribe(() => bump((n) => n + 1));
 		const scroll: any = (registry.getPlugin("scroll") as any)?.provides()?.forDocument(documentId);
+		const position = (metrics?: any): ReadingPosition | null => {
+			const m = metrics ?? scroll?.getMetrics?.();
+			const first = m?.pageVisibilityMetrics?.[0];
+			if (!first) return null;
+			return { page: first.pageNumber, y: Math.max(0, Math.round(first.original?.pageY ?? 0)) };
+		};
+		// Not native: EmbedPDF forgets where the reader was; the host is told, throttled, so it can remember per file.
+		let lastReport = 0, reportTimer: ReturnType<typeof setTimeout> | null = null;
+		const offScroll = scroll?.onScroll?.((m: any) => {
+			const report = () => {
+				lastReport = Date.now();
+				const pos = position(m);
+				if (pos) host.positionChanged(pos);
+			};
+			if (reportTimer) clearTimeout(reportTimer);
+			if (Date.now() - lastReport > 1000) report();
+			else reportTimer = setTimeout(report, 1000);
+		});
 		onReady({
 			registry,
 			documentId,
@@ -204,6 +234,8 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 				tools.notify();
 			},
 			refreshBacklinks: () => setBacklinks(host.backlinks()),
+			position: () => position(),
+			restore: (pos) => scroll?.scrollToPage?.({ pageNumber: pos.page, pageCoordinates: { x: 0, y: pos.y }, behavior: "instant" }),
 			goTo: (subpath) => {
 				const sub = parseSubpath(subpath);
 				if (!sub.page) return;
@@ -227,6 +259,8 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 			},
 		});
 		return () => {
+			if (reportTimer) clearTimeout(reportTimer);
+			offScroll?.();
 			offAnn?.();
 			offCapture?.();
 			offTools();

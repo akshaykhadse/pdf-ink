@@ -27,6 +27,10 @@ arrows and the pane menu) is hidden for PDF Ink panes.
 **Full screen**: the PDF pane covers the Obsidian window, with only the
 toolbar left. `Esc` or the button leaves.
 
+**Last position**: the plugin remembers where you were in each PDF (page and
+offset, saved in its data file, moved on rename) and goes back there when the
+file is opened again. EmbedPDF itself does not keep this.
+
 ## Links
 
 Text selections and areas become PDF++-style links such as
