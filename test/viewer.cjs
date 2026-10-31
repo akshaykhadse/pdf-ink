@@ -403,6 +403,9 @@ const files = {
 	await touch("touchEnd", []);
 	await page.waitForTimeout(500);
 	check("stylus mode off: with the pen tool two fingers do not pinch", Math.abs((await api(`zoom.getState().currentZoomLevel`)) - z3) < 0.01, `zoom ${z3} -> ${await api(`zoom.getState().currentZoomLevel`)}, annotations ${n2b} -> ${await count()}`);
+	// The first finger drew one stroke; the second finger was swallowed, so the stroke is a plain line, not a zigzag between the two.
+	const twoFinger = await api(`(() => { const o = ann.getAnnotations().at(-1).object; const pts = o.inkList?.[0]?.points ?? []; return [${n2b}, ann.getAnnotations().length, pts.length, pts.every((p, i, a) => i === 0 || p.x <= a[i - 1].x + 1)]; })()`);
+	check("stylus mode off: a second finger does not weave into the stroke", twoFinger[1] === n2b + 1 && twoFinger[3] === true, JSON.stringify(twoFinger));
 	await click(".pdf-ink-stylus");
 	await page.waitForTimeout(100);
 

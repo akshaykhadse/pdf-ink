@@ -81,7 +81,8 @@ export class PointerGuard {
 	/** True while the coalesced samples of a move are being re-dispatched. */
 	private replaying = false;
 	/** How each active touch was classified when it landed (stylus mode may change mid-touch). */
-	private readonly kinds = new Map<number, "finger" | "pen">();
+	/** What each touch is: a finger (scrolls), a pen stand-in (draws), or an extra touch while something already draws (ignored). */
+	private readonly kinds = new Map<number, "finger" | "pen" | "extra">();
 	/** What the current eraser stroke has removed, recorded as one undo step when it ends. */
 	private erased: any[] = [];
 	private readonly win: Window;
@@ -199,7 +200,18 @@ export class PointerGuard {
 		return this.tools.stylusMode;
 	}
 
+	private swallowExtra(e: PointerEvent): boolean {
+		if (this.kinds.get(e.pointerId) !== "extra") return false;
+		e.stopPropagation();
+		e.preventDefault();
+		return true;
+	}
+
 	private forget(e: PointerEvent) {
+		if (this.kinds.get(e.pointerId) === "extra") {
+			this.kinds.delete(e.pointerId);
+			return;
+		}
 		const finger = this.isFinger(e);
 		this.kinds.delete(e.pointerId);
 		if (finger) {
@@ -224,7 +236,13 @@ export class PointerGuard {
 	// ------------------------------------------------------------------ events
 
 	private onDown(e: PointerEvent) {
-		if (e.pointerType === "touch") this.kinds.set(e.pointerId, this.tools.stylusMode ? "finger" : "pen");
+		if (e.pointerType === "touch") {
+			// Stylus mode off: the first touch draws; a second finger landing while a pointer draws is swallowed,
+			// else EmbedPDF's ink tool would weave both into one zigzag stroke.
+			const extra = !this.tools.stylusMode && this.pens.size > 0;
+			this.kinds.set(e.pointerId, extra ? "extra" : this.tools.stylusMode ? "finger" : "pen");
+		}
+		if (this.swallowExtra(e)) return;
 		if (this.isFinger(e)) {
 			this.fingers.add(e.pointerId);
 			if (!this.blockingFingers()) return;
@@ -299,6 +317,7 @@ export class PointerGuard {
 
 	private onMove(e: PointerEvent) {
 		if (this.replaying) return;
+		if (this.swallowExtra(e)) return;
 		if (this.isFinger(e)) {
 			if (!this.blocked.has(e.pointerId)) return;
 			e.stopPropagation();
@@ -350,6 +369,10 @@ export class PointerGuard {
 	}
 
 	private onUp(e: PointerEvent) {
+		if (this.swallowExtra(e)) {
+			this.kinds.delete(e.pointerId);
+			return;
+		}
 		if (this.isFinger(e)) {
 			const blocked = this.blocked.has(e.pointerId);
 			const s = this.scroller;
