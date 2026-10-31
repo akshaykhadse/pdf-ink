@@ -204,13 +204,13 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 2px;
-	padding: 4px;
-	border-radius: var(--radius-m, 8px);
+	gap: 0;
+	padding: 2px;
+	border-radius: 6px;
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
-	box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.2));
-	font-size: var(--font-ui-small);
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+	font-size: var(--font-ui-smaller, 12px);
 	color: var(--text-normal);
 	white-space: nowrap;
 }
@@ -225,17 +225,25 @@
 .pdf-ink-menu-item {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
-	height: 30px;
-	padding: 0 8px !important;
+	gap: 5px;
+	height: 26px;
+	padding: 0 7px !important;
 	margin: 0;
 	border: 0;
-	border-radius: var(--radius-s, 4px);
+	border-radius: 3px;
 	background: transparent;
 	box-shadow: none;
 	color: var(--text-normal);
-	font-size: var(--font-ui-small);
+	font-size: var(--font-ui-smaller, 12px);
+	line-height: 1;
 	cursor: pointer;
+}
+
+.pdf-ink-menu-item .pdf-ink-icon,
+.pdf-ink-menu-item .pdf-ink-icon svg {
+	width: 14px;
+	height: 14px;
+	color: var(--text-muted);
 }
 
 .pdf-ink-menu-item:hover:not(:disabled) {

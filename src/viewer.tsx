@@ -379,7 +379,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 												})}
 											</div>
 										)}
-										<SelectionLayer documentId={documentId} pageIndex={pageIndex} selectionMenu={selectionMenu} />
+										<SelectionLayer documentId={documentId} pageIndex={pageIndex} background="rgba(0, 120, 255, 0.22)" selectionMenu={selectionMenu} />
 										<AnnotationLayer documentId={documentId} pageIndex={pageIndex} selectionMenu={annotationMenu} groupSelectionMenu={groupMenu} />
 										{tools.tool === "areaLink" && <MarqueeCapture documentId={documentId} pageIndex={pageIndex} className="pdf-ink-marquee" />}
 										{flash && flash.pageIndex === pageIndex && (
