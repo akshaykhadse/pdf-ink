@@ -19,13 +19,14 @@ import { GlobalPointerProvider, InteractionManagerPluginPackage, PagePointerProv
 import { PanPluginPackage } from "@embedpdf/plugin-pan/preact";
 import { SelectionLayer, SelectionPluginPackage } from "@embedpdf/plugin-selection/preact";
 import { HistoryPluginPackage } from "@embedpdf/plugin-history/preact";
-import { AnnotationLayer, AnnotationPluginPackage } from "@embedpdf/plugin-annotation/preact";
+import { AnnotationLayer, AnnotationPluginPackage, AnnotationRendererProvider } from "@embedpdf/plugin-annotation/preact";
 import { CapturePluginPackage, MarqueeCapture } from "@embedpdf/plugin-capture/preact";
 import { ExportPluginPackage } from "@embedpdf/plugin-export/preact";
 import { Toolbar } from "./toolbar";
 import { PointerGuard } from "./guard";
 import type { Settings } from "./settings";
 import { installInkSmoothing } from "./ink";
+import { InkPreviewRenderers } from "./ink-preview";
 import { ToolController } from "./tools";
 import { Backlink, LinkVars, PageRect, fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "./links";
 import { Icon } from "./icon";
@@ -377,6 +378,8 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 	};
 
 	return (
+		<AnnotationRendererProvider>
+		<InkPreviewRenderers />
 		<div class="pdf-ink" ref={rootRef}>
 			<Toolbar tools={tools} settings={settings} onOpenSidecar={host.openSidecar} />
 			<GlobalPointerProvider documentId={documentId} class="pdf-ink-global">
@@ -446,5 +449,6 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 			</Viewport>
 			</GlobalPointerProvider>
 		</div>
+		</AnnotationRendererProvider>
 	);
 }
