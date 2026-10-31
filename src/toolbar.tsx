@@ -126,9 +126,9 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 		<span class="pdf-ink-pages">
 			<input
 				class="pdf-ink-page-input"
-				type="number"
-				min={1}
-				max={state.pages || 1}
+				type="text"
+				inputMode="numeric"
+				pattern="[0-9]*"
 				value={state.page}
 				aria-label="Page"
 				onChange={(e) => tools.goToPage(Number((e.target as HTMLInputElement).value))}

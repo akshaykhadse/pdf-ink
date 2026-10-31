@@ -403,25 +403,33 @@
 	font-variant-numeric: tabular-nums;
 }
 
-.pdf-ink-page-input {
-	width: 2.4em;
-	height: 22px;
-	padding: 0 2px;
-	border: 0;
-	border-radius: 3px;
-	background: transparent;
-	box-shadow: none;
-	color: var(--text-normal);
+/* Obsidian (mobile above all) gives every input a tall box, padding and a large font: pin this one. */
+.pdf-ink input.pdf-ink-page-input {
+	box-sizing: border-box;
+	width: 3em !important;
+	height: 24px !important;
+	min-height: 0 !important;
+	max-height: none !important;
+	padding: 0 3px !important;
+	margin: 0 !important;
+	border: 0 !important;
+	border-radius: 3px !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	color: var(--text-normal) !important;
 	text-align: right;
-	font-size: var(--font-ui-smaller, 11px);
+	font-size: var(--font-ui-smaller, 11px) !important;
+	line-height: 24px !important;
+	font-variant-numeric: tabular-nums;
 	-moz-appearance: textfield;
 	appearance: textfield;
 }
 
-.pdf-ink-page-input:hover,
-.pdf-ink-page-input:focus {
-	background: var(--background-modifier-hover);
-	box-shadow: none;
+.pdf-ink input.pdf-ink-page-input:hover,
+.pdf-ink input.pdf-ink-page-input:focus {
+	background: var(--background-modifier-hover) !important;
+	box-shadow: none !important;
+	outline: none !important;
 }
 
 .pdf-ink-page-input::-webkit-inner-spin-button,
