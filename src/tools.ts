@@ -9,18 +9,19 @@
  *   textHighlight EmbedPDF's `highlight` tool: selecting text makes a highlight.
  *   eraser        our own interaction mode; the pointer guard removes what it crosses.
  *   areaLink      EmbedPDF's capture plugin marquee (native); the rect becomes a link.
+ *   image         EmbedPDF's `stamp` tool (native): a tap opens the file picker and places the picture there.
  */
 import type { Settings, ToolStyle } from "./settings";
 
-export type ToolId = "hand" | "pointer" | "pen" | "marker" | "textHighlight" | "eraser" | "areaLink";
+export type ToolId = "hand" | "pointer" | "pen" | "marker" | "textHighlight" | "eraser" | "areaLink" | "image";
 
-export const DRAWING_TOOLS: ReadonlySet<ToolId> = new Set<ToolId>(["pen", "marker", "textHighlight", "eraser", "areaLink"]);
+export const DRAWING_TOOLS: ReadonlySet<ToolId> = new Set<ToolId>(["pen", "marker", "textHighlight", "eraser", "areaLink", "image"]);
 /** Tools whose style (colour, width, opacity) can be changed. */
 export const STYLED_TOOLS: ReadonlySet<ToolId> = new Set<ToolId>(["pen", "marker", "textHighlight"]);
 
 export const ERASER_MODE = "pdfInkEraser";
 
-const EMBED_TOOL: Record<string, string> = { pen: "ink", marker: "inkHighlighter", textHighlight: "highlight" };
+const EMBED_TOOL: Record<string, string> = { pen: "ink", marker: "inkHighlighter", textHighlight: "highlight", image: "stamp" };
 
 export interface ToolState {
 	tool: ToolId;
@@ -169,7 +170,7 @@ export class ToolController {
 
 	private modeChanged(mode: string) {
 		if (this.applying) return;
-		const byMode: Record<string, ToolId> = { panMode: "hand", pointerMode: "pointer", ink: "pen", inkHighlighter: "marker", highlight: "textHighlight", [ERASER_MODE]: "eraser", marqueeCapture: "areaLink" };
+		const byMode: Record<string, ToolId> = { panMode: "hand", pointerMode: "pointer", ink: "pen", inkHighlighter: "marker", highlight: "textHighlight", stamp: "image", [ERASER_MODE]: "eraser", marqueeCapture: "areaLink" };
 		const tool = byMode[mode];
 		if (this._tool === "areaLink" && mode === "pointerMode") {
 			// The capture plugin leaves its mode after each capture; the tool stays until the user picks another.

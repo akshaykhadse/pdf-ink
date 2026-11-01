@@ -29,6 +29,7 @@ const DRAW_TOOLS: ToolDef[] = [
 	{ id: "textHighlight", icon: "text-select|text-cursor-input|type", label: "Text highlighter" },
 	{ id: "eraser", icon: "eraser", label: "Eraser" },
 	{ id: "areaLink", icon: "scan", label: "Area link" },
+	{ id: "image", icon: "image", label: "Image: tap the page to insert a picture" },
 ];
 
 /** Thickness of the colour bar that stands for a stroke width in PDF points. */

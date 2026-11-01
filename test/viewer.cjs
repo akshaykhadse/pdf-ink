@@ -3,6 +3,38 @@
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
+
+/** A solid 2-colour PNG of the given size, for the image tool. */
+function tinyPng(w, h) {
+	const zlib = require("zlib");
+	const crc = (buf) => {
+		let c = ~0;
+		for (const b of buf) {
+			c ^= b;
+			for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1;
+		}
+		return (~c) >>> 0;
+	};
+	const chunk = (type, data) => {
+		const len = Buffer.alloc(4);
+		len.writeUInt32BE(data.length);
+		const td = Buffer.concat([Buffer.from(type), data]);
+		const c = Buffer.alloc(4);
+		c.writeUInt32BE(crc(td));
+		return Buffer.concat([len, td, c]);
+	};
+	const ihdr = Buffer.alloc(13);
+	ihdr.writeUInt32BE(w, 0);
+	ihdr.writeUInt32BE(h, 4);
+	ihdr[8] = 8; ihdr[9] = 2; // 8-bit RGB
+	const raw = Buffer.alloc((w * 3 + 1) * h);
+	for (let r = 0; r < h; r++) {
+		raw[r * (w * 3 + 1)] = 0;
+		for (let cx = 0; cx < w; cx++) raw.set([200, 40, 40], r * (w * 3 + 1) + 1 + cx * 3);
+	}
+	return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+
 const root = path.resolve(__dirname, "..");
 const out = path.join(__dirname, "out");
 fs.mkdirSync(out, { recursive: true });
@@ -354,6 +386,29 @@ const files = {
 	await page.mouse.click((textX0 + textX1) / 2, textY);
 	await page.waitForTimeout(200);
 	check("the text highlighter does not select an existing highlight on click", (await api(`ann.getSelectedAnnotations().length`)) === 0 && (await api(`tools.tool`)) === "textHighlight", `selected ${await api(`ann.getSelectedAnnotations().length`)}`);
+
+	// --- image (EmbedPDF's native stamp tool): a tap opens the file picker and places the picture there
+	await tool("image");
+	check("the image tool activates EmbedPDF's stamp tool", (await api(`ann.getActiveTool()?.id`)) === "stamp");
+	// Headless Chromium does not surface the picker, so the picked file is set on the input the tap armed.
+	await page.mouse.click(x, y + 300);
+	await page.waitForTimeout(100);
+	const picked = await page.$$('input[type=file][accept="image/png,image/jpeg"]');
+	check("a tap with the image tool asks for a PNG or JPEG file", picked.length === 1, `${picked.length} armed input(s)`);
+	if (picked.length) await picked[0].setInputFiles({ name: "pic.png", mimeType: "image/png", buffer: tinyPng(8, 4) });
+	await page.waitForTimeout(600);
+	const st = await api(`(() => { const o = ann.getAnnotations().at(-1).object; return [o.type, o.rect.size.width / o.rect.size.height, ann.getAnnotations().length, ann.getSelectedAnnotations().length]; })()`);
+	check("the picked picture becomes a stamp annotation at the tap, keeping its aspect ratio", st[0] === 13 && Math.abs(st[1] - 2) < 0.05 && st[2] === 6 && st[3] === 0, JSON.stringify(st));
+	const savedImg = await page.evaluate(async () => {
+		const ok = await window.view.saveNow(true);
+		const txt = new TextDecoder("latin1").decode(window.saved[window.saved.length - 1]);
+		window.saved.length = 0; // the save check further down expects the first save
+		return [ok, (txt.match(/\/Stamp/g) || []).length, (txt.match(/\/Image/g) || []).length];
+	});
+	check("the image is written into the PDF as a stamp with an image stream", savedImg[0] === true && savedImg[1] >= 1 && savedImg[2] >= 1, JSON.stringify(savedImg));
+	await api(`tools.undo()`);
+	await page.waitForTimeout(200);
+	check("undo removes the inserted image", (await api(`ann.getAnnotations().length`)) === 5);
 
 	// --- eraser
 	await tool("eraser");

@@ -128,6 +128,8 @@ function App(props: ViewerProps) {
 					ink("inkHighlighter", s.marker),
 					// exclusive as well: a tap on an existing highlight or stroke must not select it while highlighting.
 					{ id: "highlight", defaults: { strokeColor: s.textHighlight.color, color: s.textHighlight.color, opacity: s.textHighlight.opacity }, interaction: { exclusive: true } },
+					// stamp (image): a tap opens the file picker and drops the picture there; exclusive so a tap on an existing annotation inserts rather than selects.
+					{ id: "stamp", interaction: { exclusive: true } },
 				] as any,
 			}),
 			createPluginRegistration(CapturePluginPackage, { scale: 2, imageType: "image/png", withAnnotations: true }),
