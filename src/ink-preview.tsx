@@ -12,6 +12,7 @@
 import { useLayoutEffect, useRef } from "preact/hooks";
 import { PdfAnnotationSubtype, PdfBlendMode, Rect } from "@embedpdf/models";
 import { createRenderer, useRegisterRenderers } from "@embedpdf/plugin-annotation/preact";
+import { stampRenderer } from "./stamp";
 
 interface Point {
 	x: number;
@@ -101,6 +102,7 @@ function CanvasInkPreview({ data, bounds, scale }: { data: InkPreviewData; bound
 }
 
 const renderers = [
+	stampRenderer,
 	createRenderer<any, InkPreviewData>({
 		id: "pdf-ink-canvas-preview",
 		matchesPreview: (p) => p.type === PdfAnnotationSubtype.INK,
@@ -110,8 +112,8 @@ const renderers = [
 	}),
 ];
 
-/** Mount once under an AnnotationRendererProvider to take over ink previews. */
-export function InkPreviewRenderers() {
+/** Mount once under an AnnotationRendererProvider to take over ink previews and stamp rendering. */
+export function PdfInkRenderers() {
 	useRegisterRenderers(renderers);
 	return null;
 }

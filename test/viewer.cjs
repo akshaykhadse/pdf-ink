@@ -406,9 +406,31 @@ const files = {
 		return [ok, (txt.match(/\/Stamp/g) || []).length, (txt.match(/\/Image/g) || []).length];
 	});
 	check("the image is written into the PDF as a stamp with an image stream", savedImg[0] === true && savedImg[1] >= 1 && savedImg[2] >= 1, JSON.stringify(savedImg));
-	await api(`tools.undo()`);
+	// Reopen the saved file: this stamp's bytes are not known any more, so it is drawn by the engine.
+	await page.evaluate(async () => {
+		await window.view.onUnloadFile(window.file);
+		await window.view.onLoadFile(window.file);
+	});
+	await ready();
+	const stampPixel = async () =>
+		page.evaluate(async () => {
+			for (let i = 0; i < 30; i++) {
+				const img = document.querySelector(".pdf-ink-page [style*='z-index: 2'] img");
+				if (img && img.complete && img.naturalWidth) {
+					const c = document.createElement("canvas");
+					c.width = img.naturalWidth; c.height = img.naturalHeight;
+					c.getContext("2d").drawImage(img, 0, 0);
+					return [...c.getContext("2d").getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 1, 1).data];
+				}
+				await new Promise((r) => setTimeout(r, 100));
+			}
+			return "no stamp image";
+		});
+	const reopened = await stampPixel();
+	check("after reopening, the engine draws the saved image", Array.isArray(reopened) && reopened[0] > 150 && reopened[1] < 80 && (await count()) === 6, `${JSON.stringify(reopened)}, ${await count()} annotations`);
+	await api(`(() => { const o = ann.getAnnotations().find((a) => a.object.type === 13).object; ann.deleteAnnotation(o.pageIndex, o.id); })()`);
 	await page.waitForTimeout(200);
-	check("undo removes the inserted image", (await api(`ann.getAnnotations().length`)) === 5);
+	check("deleting the reopened image leaves the five earlier annotations", (await count()) === 5, await count());
 
 	// --- paste (not native): Ctrl/Cmd+V with a picture drops it in the middle of the visible page
 	await tool("pen");
@@ -419,6 +441,8 @@ const files = {
 	}, Array.from(tinyPng(8, 4)));
 	await page.waitForTimeout(600);
 	const pasted = await api(`(() => { const o = ann.getAnnotations().at(-1).object; const m = scroll.getMetrics().pageVisibilityMetrics[0].original; return [o.type, o.pageIndex, o.rect.origin.x >= m.pageX, o.rect.origin.y >= m.pageY, o.rect.origin.x + o.rect.size.width <= m.pageX + m.visibleWidth + 0.01, ann.getAnnotations().length, tools.tool, ann.getSelectedAnnotations()[0]?.object.id === o.id]; })()`);
+	const shown = await stampPixel();
+	check("the pasted picture is visible right away (not an empty box)", Array.isArray(shown) && shown[0] > 150 && shown[1] < 80, JSON.stringify(shown));
 	check("a pasted picture becomes a stamp inside the visible area, selected, with the pointer tool active", pasted[0] === 13 && pasted[1] === 0 && pasted[2] && pasted[3] && pasted[4] && pasted[5] === 6 && pasted[6] === "pointer" && pasted[7] === true, JSON.stringify(pasted));
 	await page.evaluate(() => {
 		const dt = new DataTransfer();

@@ -6,7 +6,7 @@
 import { render } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { PdfEngine } from "@embedpdf/models";
-import { uuidV4 } from "@embedpdf/models";
+import { PdfAnnotationSubtype, uuidV4 } from "@embedpdf/models";
 import { createPluginRegistration, type PluginRegistry } from "@embedpdf/core";
 import { EmbedPDF, useDocumentState, useRegistry } from "@embedpdf/core/preact";
 import { DocumentContent, DocumentManagerPluginPackage } from "@embedpdf/plugin-document-manager/preact";
@@ -26,7 +26,8 @@ import { Toolbar } from "./toolbar";
 import { PointerGuard } from "./guard";
 import type { Settings } from "./settings";
 import { installInkSmoothing } from "./ink";
-import { InkPreviewRenderers } from "./ink-preview";
+import { PdfInkRenderers } from "./ink-preview";
+import { forgetStampSource, rememberStampSource } from "./stamp";
 import { ToolController } from "./tools";
 import { Backlink, LinkVars, PageRect, fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "./links";
 import { Icon } from "./icon";
@@ -202,9 +203,12 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		const guard = new PointerGuard(root, tools, host.settings, host.onChange);
 		const annotations: any = (registry.getPlugin("annotation") as any)?.provides();
 		const scoped = annotations?.forDocument(documentId);
-		const offAnn = scoped?.onAnnotationEvent?.((event: { type: string; committed?: boolean }) => {
+		const offAnn = scoped?.onAnnotationEvent?.((event: any) => {
 			// Commits re-emit every event with committed: true; only new edits mark the file dirty.
 			if (event.type !== "loaded" && !event.committed) host.onChange();
+			// A new stamp carries its image bytes; keep them so it shows at once (see stamp.tsx).
+			if (event.type === "create" && !event.committed && event.annotation?.type === PdfAnnotationSubtype.STAMP && event.ctx?.data) rememberStampSource(event.annotation.id, event.ctx.data);
+			if (event.type === "delete" && event.committed) forgetStampSource(event.annotation?.id);
 		});
 		const capture: any = (registry.getPlugin("capture") as any)?.provides()?.forDocument(documentId);
 		const offCapture = capture?.onCaptureArea?.((e: any) => setArea({ pageIndex: e.pageIndex, rect: toRect(e.rect) }));
@@ -396,7 +400,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 
 	return (
 		<AnnotationRendererProvider>
-		<InkPreviewRenderers />
+		<PdfInkRenderers />
 		<div class="pdf-ink" ref={rootRef}>
 			<Toolbar tools={tools} settings={settings} onOpenSidecar={host.openSidecar} />
 			<GlobalPointerProvider documentId={documentId} class="pdf-ink-global">
