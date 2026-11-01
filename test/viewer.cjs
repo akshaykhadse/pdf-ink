@@ -275,6 +275,21 @@ const files = {
 	await drag(x + 320, y - 40, x - 20, y + 160, 10, 400); // starts in empty space right of the text
 	const selN = await api(`ann.getSelectedAnnotations().length`);
 	check("pointer: dragging a box selects every stroke inside it", selN === 3, selN);
+	// The group menu offers the same swatches as the single menu and recolours the whole selection as one undo step.
+	const groupSwatches = await page.evaluate(() => [...document.querySelectorAll(".pdf-ink-menu .pdf-ink-swatch")].map((b) => b.getAttribute("aria-label")));
+	const colorsBefore = await api(`ann.getAnnotations().map((a) => a.object.strokeColor)`);
+	await page.evaluate(() => document.querySelector('.pdf-ink-menu [aria-label="#e03131"]').click());
+	await page.waitForTimeout(200);
+	const groupColors = await api(`ann.getAnnotations().map((a) => a.object.strokeColor)`);
+	await click('.pdf-ink-toolbar [aria-label="Undo"]');
+	await page.waitForTimeout(300);
+	const undone = await api(`ann.getAnnotations().map((a) => a.object.strokeColor)`);
+	check("the group menu recolours every selected stroke with one undo step", groupSwatches.length >= 3 && colorsBefore.some((c) => c !== "#e03131") && groupColors.every((c) => c === "#e03131") && JSON.stringify(undone) === JSON.stringify(colorsBefore), `swatches ${groupSwatches.length}, before ${JSON.stringify(colorsBefore)}, after ${JSON.stringify(groupColors)}, undone ${JSON.stringify(undone)}`);
+	await click('.pdf-ink-toolbar [aria-label="Redo"]');
+	await page.waitForTimeout(300);
+	check("redo recolours them again", (await api(`ann.getAnnotations().every((a) => a.object.strokeColor === "#e03131")`)) === true);
+	await drag(x + 320, y - 40, x - 20, y + 160, 10, 400);
+	check("the strokes are selected again for the delete check", (await api(`ann.getSelectedAnnotations().length`)) === 3);
 	// A real mouse click: the menu must sit outside the selection box's handle layer.
 	const del = await page.evaluate((sel) => {
 		const b = document.querySelector('.pdf-ink-menu [aria-label="Delete selected"]');

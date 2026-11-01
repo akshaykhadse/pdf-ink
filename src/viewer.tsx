@@ -337,22 +337,36 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		);
 	};
 
+	/** Pen strokes take the pen palette; ink and text highlights take the highlight palette. A mixed selection gets both. */
+	const paletteFor = (objects: any[]): string[] => {
+		const pen = objects.some((o) => o?.type === 15 && o.intent !== "InkHighlight");
+		const hl = objects.some((o) => o?.type === 9 || (o?.type === 15 && o.intent === "InkHighlight"));
+		return [...new Set([...(pen ? settings.penColors : []), ...(hl ? settings.highlightColors : [])])];
+	};
+	const Swatches = ({ objects }: { objects: any[] }) => {
+		const colors = paletteFor(objects);
+		if (!colors.length) return null;
+		const shared = objects.every((o) => o?.strokeColor?.toLowerCase() === objects[0]?.strokeColor?.toLowerCase()) ? objects[0]?.strokeColor?.toLowerCase() : null;
+		const items = objects.map((o) => ({ pageIndex: o.pageIndex, id: o.id }));
+		return (
+			<>
+				{colors.map((c) => (
+					<button key={c} class={"pdf-ink-swatch" + (shared === c ? " is-active" : "")} aria-label={c} onClick={() => tools.recolorMany(items, c)}>
+						<span class="pdf-ink-dot" style={{ background: c }} />
+					</button>
+				))}
+			</>
+		);
+	};
+
 	const annotationMenu = ({ menuWrapperProps, context, selected, placement }: any) => {
 		if (!selected) return null;
 		const a = context.annotation?.object;
 		const pageIndex: number = context.pageIndex;
 		const ann = tools.annotations();
-		const isInk = a?.type === 15, isHighlight = a?.type === 9;
-		const colors = isInk && a.intent !== "InkHighlight" ? settings.penColors : settings.highlightColors;
-		const recolor = (color: string) => ann?.updateAnnotation(pageIndex, a.id, { strokeColor: color, color });
 		return (
 			<Menu wrapperProps={menuWrapperProps} placement={placement}>
-					{(isInk || isHighlight) &&
-						colors.map((c) => (
-							<button key={c} class={"pdf-ink-swatch" + (a.strokeColor?.toLowerCase() === c ? " is-active" : "")} aria-label={c} onClick={() => recolor(c)}>
-								<span class="pdf-ink-dot" style={{ background: c }} />
-							</button>
-						))}
+					{a && <Swatches objects={[a]} />}
 					{a && (
 						<button class="pdf-ink-menu-item" aria-label="Copy link to annotation" onClick={() => copyLink(pageIndex, toRect(a.rect), a.custom?.text ?? a.contents ?? `p.${pageIndex + 1}`, settings.areaLinkFormats[0]?.template ?? "[[{{file}}#page={{page}}&rect={{rect}}]]", a.strokeColor ?? "")}>
 							<Icon name="link" />
@@ -370,6 +384,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		const items: any[] = context.annotations ?? [];
 		return (
 			<Menu wrapperProps={menuWrapperProps} placement={placement}>
+					<Swatches objects={items.map((t) => t.object)} />
 					<button class="pdf-ink-menu-item" aria-label="Delete selected" onClick={() => tools.deleteMany(items.map((t) => ({ pageIndex: t.object.pageIndex, id: t.object.id })))}>
 						<Icon name="trash-2" /> Delete {items.length}
 					</button>

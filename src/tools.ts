@@ -278,6 +278,34 @@ export class ToolController {
 		this.recordDeletion(this.deleteQuietly(items));
 	}
 
+	/**
+	 * Recolours strokes and highlights as one undo step (EmbedPDF would record
+	 * one history entry per annotation). Returns how many were changed.
+	 */
+	recolorMany(items: { pageIndex: number; id: string }[], color: string): number {
+		const ann = this.annotations();
+		if (!ann || !items.length) return 0;
+		const originals = items.map((it) => ann.getAnnotationById?.(it.id)?.object).filter((o: any) => o && (o.type === 15 || o.type === 9));
+		if (!originals.length) return 0;
+		const before = originals.map((o: any) => ({ pageIndex: o.pageIndex, id: o.id, strokeColor: o.strokeColor, color: o.color }));
+		const apply = (c: string) => this.quietly(() => originals.forEach((o: any) => ann.updateAnnotation(o.pageIndex, o.id, { strokeColor: c, color: c })));
+		apply(color);
+		const history = this.plugin("history")?.forDocument(this.documentId);
+		if (history) {
+			let first = true;
+			history.register(
+				{
+					execute: () => (first ? void (first = false) : apply(color)),
+					undo: () => this.quietly(() => before.forEach((b) => ann.updateAnnotation(b.pageIndex, b.id, { strokeColor: b.strokeColor, color: b.color }))),
+					metadata: { source: "pdf-ink", annotationIds: originals.map((o: any) => o.id) },
+				},
+				"annotations"
+			);
+		}
+		this.notify();
+		return originals.length;
+	}
+
 	private quietly(fn: () => void) {
 		const instance: any = this.registry?.getPlugin?.("annotation");
 		if (!instance || !("history" in instance)) return fn();
