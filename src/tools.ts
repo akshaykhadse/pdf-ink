@@ -11,6 +11,7 @@
  *   areaLink      EmbedPDF's capture plugin marquee (native); the rect becomes a link.
  *   image         EmbedPDF's `stamp` tool (native): a tap opens the file picker and places the picture there.
  */
+import { fitSizeWithin, getImageMetadata, uuidV4 } from "@embedpdf/models";
 import type { Settings, ToolStyle } from "./settings";
 
 export type ToolId = "hand" | "pointer" | "pen" | "marker" | "textHighlight" | "eraser" | "areaLink" | "image";
@@ -237,6 +238,33 @@ export class ToolController {
 
 	pushAllStyles() {
 		for (const t of ["pen", "marker", "textHighlight"] as ToolId[]) this.pushStyle(t);
+	}
+
+	// --------------------------------------------------------------- images
+
+	/**
+	 * Places a PNG or JPEG as a stamp annotation (EmbedPDF's native image annotation) in the middle of the
+	 * visible part of the page most in view, fitted to that visible area. The bytes go to the engine as they
+	 * are; nothing is decoded or re-encoded here. Returns false when the bytes are not a PNG or JPEG.
+	 */
+	insertImage(buffer: ArrayBuffer): boolean {
+		const meta = getImageMetadata(buffer);
+		if (!meta || meta.mimeType === "application/pdf") return false;
+		const ann = this.annotations();
+		const metrics = this.plugin("scroll")?.forDocument(this.documentId)?.getMetrics?.();
+		const visible: any[] = metrics?.pageVisibilityMetrics ?? [];
+		const best = visible.reduce((a, b) => (b.visiblePercentage > (a?.visiblePercentage ?? -1) ? b : a), null as any);
+		if (!ann || !best) return false;
+		const area = best.original; // in PDF points: the visible part of the page
+		const size = fitSizeWithin(meta, { width: area.visibleWidth, height: area.visibleHeight });
+		const rect = { origin: { x: area.pageX + (area.visibleWidth - size.width) / 2, y: area.pageY + (area.visibleHeight - size.height) / 2 }, size };
+		const pageIndex = best.pageNumber - 1;
+		const id = uuidV4();
+		ann.createAnnotation(pageIndex, { type: 13, rect, name: "Image", subject: "Stamp", flags: ["print"], pageIndex, id, created: new Date() }, { data: buffer });
+		// Hand over to the pointer with the picture selected, so it can be moved or resized right away.
+		this.setTool("pointer");
+		ann.selectAnnotation?.(pageIndex, id);
+		return true;
 	}
 
 	// -------------------------------------------------------------- actions

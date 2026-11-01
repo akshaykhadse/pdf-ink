@@ -410,6 +410,27 @@ const files = {
 	await page.waitForTimeout(200);
 	check("undo removes the inserted image", (await api(`ann.getAnnotations().length`)) === 5);
 
+	// --- paste (not native): Ctrl/Cmd+V with a picture drops it in the middle of the visible page
+	await tool("pen");
+	await page.evaluate((bytes) => {
+		const dt = new DataTransfer();
+		dt.items.add(new File([new Uint8Array(bytes)], "shot.png", { type: "image/png" }));
+		document.body.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+	}, Array.from(tinyPng(8, 4)));
+	await page.waitForTimeout(600);
+	const pasted = await api(`(() => { const o = ann.getAnnotations().at(-1).object; const m = scroll.getMetrics().pageVisibilityMetrics[0].original; return [o.type, o.pageIndex, o.rect.origin.x >= m.pageX, o.rect.origin.y >= m.pageY, o.rect.origin.x + o.rect.size.width <= m.pageX + m.visibleWidth + 0.01, ann.getAnnotations().length, tools.tool, ann.getSelectedAnnotations()[0]?.object.id === o.id]; })()`);
+	check("a pasted picture becomes a stamp inside the visible area, selected, with the pointer tool active", pasted[0] === 13 && pasted[1] === 0 && pasted[2] && pasted[3] && pasted[4] && pasted[5] === 6 && pasted[6] === "pointer" && pasted[7] === true, JSON.stringify(pasted));
+	await page.evaluate(() => {
+		const dt = new DataTransfer();
+		dt.setData("text/plain", "just text");
+		document.body.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+	});
+	await page.waitForTimeout(200);
+	check("pasting text does nothing", (await api(`ann.getAnnotations().length`)) === 6);
+	await api(`tools.undo()`);
+	await page.waitForTimeout(200);
+	check("undo removes the pasted picture", (await api(`ann.getAnnotations().length`)) === 5);
+
 	// --- eraser
 	await tool("eraser");
 	check("the eraser has its own exclusive mode", (await api(`[im.getActiveMode(), ann.getActiveTool()]`)).join() === "pdfInkEraser,", await api(`im.getActiveMode()`));

@@ -70,6 +70,9 @@ export class FileView {
 	}
 	setEphemeralState(_s: any) {}
 	registerEvent() {}
+	registerDomEvent(el: EventTarget, type: string, cb: (e: any) => void) {
+		el.addEventListener(type, cb);
+	}
 	// Obsidian's View owns open()/close() and calls onOpen()/onClose() from them;
 	// a plugin view must not define methods with these names.
 	async open(_parentEl: HTMLElement) {
