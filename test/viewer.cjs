@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 
 /** A solid 2-colour PNG of the given size, for the image tool. */
-function tinyPng(w, h) {
+function tinyPng(w, h, alpha = false) {
 	const zlib = require("zlib");
 	const crc = (buf) => {
 		let c = ~0;
@@ -26,11 +26,12 @@ function tinyPng(w, h) {
 	const ihdr = Buffer.alloc(13);
 	ihdr.writeUInt32BE(w, 0);
 	ihdr.writeUInt32BE(h, 4);
-	ihdr[8] = 8; ihdr[9] = 2; // 8-bit RGB
-	const raw = Buffer.alloc((w * 3 + 1) * h);
+	const bpp = alpha ? 4 : 3;
+	ihdr[8] = 8; ihdr[9] = alpha ? 6 : 2; // 8-bit RGB or RGBA
+	const raw = Buffer.alloc((w * bpp + 1) * h);
 	for (let r = 0; r < h; r++) {
-		raw[r * (w * 3 + 1)] = 0;
-		for (let cx = 0; cx < w; cx++) raw.set([200, 40, 40], r * (w * 3 + 1) + 1 + cx * 3);
+		raw[r * (w * bpp + 1)] = 0;
+		for (let cx = 0; cx < w; cx++) raw.set(alpha ? [200, 40, 40, 255] : [200, 40, 40], r * (w * bpp + 1) + 1 + cx * bpp);
 	}
 	return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
 }
@@ -451,6 +452,24 @@ const files = {
 	});
 	await page.waitForTimeout(200);
 	check("pasting text does nothing", (await api(`ann.getAnnotations().length`)) === 6);
+	// A pasted RGBA screenshot-like PNG must end up in the saved file too.
+	await page.evaluate((bytes) => {
+		const dt = new DataTransfer();
+		dt.items.add(new File([new Uint8Array(bytes)], "shot.png", { type: "image/png" }));
+		document.body.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+	}, Array.from(tinyPng(300, 200, true)));
+	await page.waitForTimeout(800);
+	const pastedSave = await page.evaluate(async () => {
+		const dirtyBefore = window.view.dirty;
+		const ok = await window.view.saveNow(true);
+		const n = window.saved.length;
+		const txt = n ? new TextDecoder("latin1").decode(window.saved[n - 1]) : "";
+		window.saved.length = 0;
+		return [ok, (txt.match(/\/Stamp/g) || []).length, (txt.match(/\/Image/g) || []).length, dirtyBefore, n, (txt.match(/\/Ink/g) || []).length, txt.length];
+	});
+	check("two pasted pictures are written into the saved PDF", pastedSave[0] === true && pastedSave[1] >= 2 && pastedSave[2] >= 2 && (await count()) === 7, JSON.stringify(pastedSave) + ` ${await count()}`);
+	await api(`tools.undo()`);
+	await page.waitForTimeout(200);
 	await api(`tools.undo()`);
 	await page.waitForTimeout(200);
 	check("undo removes the pasted picture", (await api(`ann.getAnnotations().length`)) === 5);

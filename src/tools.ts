@@ -11,7 +11,7 @@
  *   areaLink      EmbedPDF's capture plugin marquee (native); the rect becomes a link.
  *   image         EmbedPDF's `stamp` tool (native): a tap opens the file picker and places the picture there.
  */
-import { fitSizeWithin, getImageMetadata, uuidV4 } from "@embedpdf/models";
+import { PdfAnnotationName, fitSizeWithin, getImageMetadata, uuidV4 } from "@embedpdf/models";
 import type { Settings, ToolStyle } from "./settings";
 
 export type ToolId = "hand" | "pointer" | "pen" | "marker" | "textHighlight" | "eraser" | "areaLink" | "image";
@@ -260,7 +260,7 @@ export class ToolController {
 		const rect = { origin: { x: area.pageX + (area.visibleWidth - size.width) / 2, y: area.pageY + (area.visibleHeight - size.height) / 2 }, size };
 		const pageIndex = best.pageNumber - 1;
 		const id = uuidV4();
-		ann.createAnnotation(pageIndex, { type: 13, rect, name: "Image", subject: "Stamp", flags: ["print"], pageIndex, id, created: new Date() }, { data: buffer });
+		ann.createAnnotation(pageIndex, { type: 13, rect, name: PdfAnnotationName.Image, subject: "Stamp", flags: ["print"], pageIndex, id, created: new Date() }, { data: buffer });
 		// Hand over to the pointer with the picture selected, so it can be moved or resized right away.
 		this.setTool("pointer");
 		ann.selectAnnotation?.(pageIndex, id);
