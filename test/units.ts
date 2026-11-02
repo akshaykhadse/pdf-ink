@@ -4,6 +4,7 @@ import { fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union }
 import { normalizeSettings, parseColors, parseNumbers } from "../src/settings";
 import { annotationHit } from "../src/guard";
 import { dotSize } from "../src/toolbar";
+import { TIP_MAX_AGE, tipPoints } from "../src/tip";
 
 let failed = false;
 const check = (name: string, ok: boolean, detail?: unknown) => {
@@ -47,5 +48,12 @@ check("annotationHit ignores other types", !annotationHit({ type: 1, rect: { ori
 
 // toolbar
 check("dotSize grows with width and stays within bounds", dotSize(0.25) >= 2 && dotSize(1) < dotSize(4) && dotSize(40) <= 10);
+
+
+// Pointer prediction: offsets in screen pixels become a tail in page units; a stale tip is dropped.
+const tail = tipPoints({ x: 10, y: 20 }, 2, 1000, { dx: [4, 8], dy: [2, 4], t: 990 });
+check("tipPoints continues the stroke along the predicted offsets, scaled to page units", tail.length === 2 && tail[0].x === 12 && tail[0].y === 21 && tail[1].x === 14 && tail[1].y === 22, tail);
+check("tipPoints ignores a stale prediction", tipPoints({ x: 10, y: 20 }, 2, 1000 + TIP_MAX_AGE + 1, { dx: [4], dy: [2], t: 1000 }).length === 0);
+check("tipPoints with no prediction draws nothing", tipPoints({ x: 0, y: 0 }, 1, 5, { dx: [], dy: [], t: 5 }).length === 0);
 
 if (failed) process.exit(1);

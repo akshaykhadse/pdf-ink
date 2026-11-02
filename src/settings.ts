@@ -37,6 +37,8 @@ export interface Settings {
 	smoothStrokes: boolean;
 	/** Feed the pen's coalesced samples to the stroke (browsers deliver one move per frame). */
 	fullPenRate: boolean;
+	/** Draw the browser's predicted pen positions ahead of the stroke. */
+	predictStrokes: boolean;
 	autosave: boolean;
 	openByDefault: boolean;
 	/** Where copied links go. */
@@ -66,6 +68,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	stylusMode: false,
 	smoothStrokes: true,
 	fullPenRate: true,
+	predictStrokes: true,
 	autosave: true,
 	openByDefault: false,
 	linkTarget: "both",
@@ -140,6 +143,7 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
 		stylusMode: typeof r.stylusMode === "boolean" ? r.stylusMode : d.stylusMode,
 		smoothStrokes: typeof r.smoothStrokes === "boolean" ? r.smoothStrokes : d.smoothStrokes,
 		fullPenRate: typeof r.fullPenRate === "boolean" ? r.fullPenRate : d.fullPenRate,
+		predictStrokes: typeof r.predictStrokes === "boolean" ? r.predictStrokes : d.predictStrokes,
 		autosave: typeof r.autosave === "boolean" ? r.autosave : d.autosave,
 		openByDefault: typeof r.openByDefault === "boolean" ? r.openByDefault : d.openByDefault,
 		linkTarget: r.linkTarget === "clipboard" || r.linkTarget === "sidecar" || r.linkTarget === "both" ? r.linkTarget : d.linkTarget,
@@ -177,6 +181,7 @@ export class PdfInkSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Stylus mode on by default").setDesc("Off: fingers draw too. On: fingers pan and scroll while only the pen draws. Can also be toggled on the toolbar.").addToggle((t) => t.setValue(s.stylusMode).onChange(async (v) => ((s.stylusMode = v), save())));
 		new Setting(containerEl).setName("Smooth strokes").setDesc("Resample each stroke along a curve through the pen's samples (not native to EmbedPDF, which draws straight segments).").addToggle((t) => t.setValue(s.smoothStrokes).onChange(async (v) => ((s.smoothStrokes = v), save())));
 		new Setting(containerEl).setName("Use the pen's full sample rate").setDesc("Feed the browser's coalesced pointer samples to the stroke (not native to EmbedPDF).").addToggle((t) => t.setValue(s.fullPenRate).onChange(async (v) => ((s.fullPenRate = v), save())));
+		new Setting(containerEl).setName("Predict pen movement").setDesc("Draw the browser's predicted pen positions as a short tail ahead of the stroke, which hides a frame or two of display latency (not native to EmbedPDF; the tail is never saved).").addToggle((t) => t.setValue(s.predictStrokes).onChange(async (v) => ((s.predictStrokes = v), save())));
 		new Setting(containerEl).setName("Eraser size").setDesc("Diameter in pixels.").addSlider((sl) => sl.setLimits(6, 120, 2).setValue(s.eraserSize).setDynamicTooltip().onChange(async (v) => ((s.eraserSize = v), save())));
 
 		new Setting(containerEl).setName("Tools").setHeading();

@@ -18,6 +18,7 @@
  *    and swallow the stroke: dragstart is blocked.
  */
 import type { Settings } from "./settings";
+import { clearTip, recordTip } from "./tip";
 import type { ToolController } from "./tools";
 
 interface PagePoint {
@@ -220,6 +221,7 @@ export class PointerGuard {
 			if (this.scroller?.id === e.pointerId) this.scroller = null;
 		} else {
 			this.pens.delete(e.pointerId);
+			clearTip();
 			if (this.erasing?.id === e.pointerId) this.endEraserStroke();
 			if (this.penAt?.id === e.pointerId) this.penAt = null;
 		}
@@ -340,6 +342,10 @@ export class PointerGuard {
 		if (down && this.penAt?.id === e.pointerId) {
 			this.penAt.x = e.clientX;
 			this.penAt.y = e.clientY;
+		}
+		if (down && e.isTrusted && this.settings().predictStrokes) {
+			const tool = this.tools.tool;
+			if (tool === "pen" || tool === "marker") recordTip(e);
 		}
 		if (e.pointerType === "pen" && !down) {
 			// Side button while hovering: buttons pressed, no pointerdown, no pressure. Each press toggles the eraser.
