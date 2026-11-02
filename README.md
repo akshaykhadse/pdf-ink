@@ -16,7 +16,7 @@ One tool is active at a time, picked on the floating toolbar:
 | Text highlighter | Select text to highlight it | native `highlight` tool |
 | Eraser | Remove the strokes and highlights the pointer crosses; pressing the pen's side button while hovering switches to the eraser, pressing it again returns to the previous tool | plugin addition |
 | Area link | Drag a box; copy it as a link or embed | native capture marquee, link formatting is a plugin addition |
-| Image | Tap the page to pick a PNG or JPEG; it is placed there, fitted to the page, and can be moved and resized with the pointer tool | native `stamp` tool; `Ctrl/Cmd+V` or the "Paste image from clipboard" command places a clipboard picture in the middle of the visible page (plugin addition; other formats are converted to PNG) |
+| Image | Tap the page to pick a PNG or JPEG; it is placed there, fitted to the page, and can be moved and resized with the pointer tool | native `stamp` tool |
 
 **Stylus mode** (toolbar button, off by default): fingers pan and scroll while
 only the pen draws. Off: a finger draws too, unless the hand or pointer tool is

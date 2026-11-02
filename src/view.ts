@@ -75,15 +75,6 @@ export class PdfInkView extends FileView {
 			})
 		);
 		this.registerEvent(this.app.metadataCache.on("resolved", () => this.requestBacklinks()));
-		// Ctrl/Cmd+V with a picture on the clipboard drops it onto the page (not native: EmbedPDF only has the file picker).
-		this.registerDomEvent(document, "paste", (e: ClipboardEvent) => {
-			if (!this.isActiveView() || isEditable(e.target)) return;
-			const item = Array.from(e.clipboardData?.items ?? []).find((i) => i.kind === "file" && i.type.startsWith("image/"));
-			if (!item) return;
-			e.preventDefault();
-			const file = item.getAsFile();
-			if (file) void this.insertImage(file);
-		});
 		this.registerEvent(
 			this.app.metadataCache.on("changed", (changed) => {
 				// Only notes that link (or linked) to this PDF matter, not every keystroke in the vault.
@@ -119,43 +110,6 @@ export class PdfInkView extends FileView {
 			else this.pendingSubpath = subpath;
 		}
 		super.setEphemeralState(state);
-	}
-
-	private isActiveView(): boolean {
-		const ws: any = this.app.workspace;
-		return ws.getActiveViewOfType ? ws.getActiveViewOfType(PdfInkView) === this : true;
-	}
-
-	/** Places a picture (a pasted or picked blob) on the visible page; non-PNG/JPEG images are converted to PNG first. */
-	async insertImage(blob: Blob): Promise<boolean> {
-		const tools = this.handle?.tools;
-		if (!tools) return false;
-		let buffer = await blob.arrayBuffer();
-		if (!tools.insertImage(buffer)) {
-			const png = await toPng(blob);
-			if (!png || !tools.insertImage((buffer = await png.arrayBuffer()))) {
-				new Notice("PDF Ink: the clipboard has no picture that can be placed.");
-				return false;
-			}
-		}
-		return true;
-	}
-
-	/** The "Paste image" command: reads the clipboard (needs the browser's permission) and places the picture. */
-	async pasteImage(): Promise<void> {
-		try {
-			const items = await navigator.clipboard.read();
-			for (const item of items) {
-				const type = item.types.find((t) => t.startsWith("image/"));
-				if (type) {
-					await this.insertImage(await item.getType(type));
-					return;
-				}
-			}
-			new Notice("PDF Ink: no picture on the clipboard.");
-		} catch (e: any) {
-			new Notice(`PDF Ink: cannot read the clipboard here (${e?.message ?? e}). Use Ctrl/Cmd+V instead.`);
-		}
 	}
 
 	/** Saves pending changes, if any. */
@@ -360,25 +314,5 @@ export class PdfInkView extends FileView {
 		}
 		if (!ok && !closing && this.dirty && this.plugin.settings.autosave) this.requestAutosave();
 		return ok;
-	}
-}
-
-function isEditable(target: EventTarget | null): boolean {
-	const el = target as HTMLElement | null;
-	return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-}
-
-/** Re-encodes an image the engine cannot take (GIF, WebP, BMP...) as PNG through a canvas. */
-async function toPng(blob: Blob): Promise<Blob | null> {
-	try {
-		const bitmap = await createImageBitmap(blob);
-		const canvas = document.createElement("canvas");
-		canvas.width = bitmap.width;
-		canvas.height = bitmap.height;
-		canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
-		bitmap.close();
-		return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-	} catch {
-		return null;
 	}
 }

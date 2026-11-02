@@ -53,7 +53,6 @@ export default class PdfInkPlugin extends Plugin {
 				if (v.file) void openSidecar(this.app, this.settings, v.file, v.leaf).catch((e) => new Notice(`PDF Ink: ${e?.message ?? e}`));
 			}),
 		});
-		this.addCommand({ id: "paste-image", name: "Paste image from clipboard", checkCallback: withView((v) => void v.pasteImage()) });
 		this.addCommand({ id: "toggle-stylus-mode", name: "Toggle stylus mode", checkCallback: withView((v) => (v as any).handle?.tools.setStylusMode(!this.settings.stylusMode)) });
 
 		this.registerEvent(

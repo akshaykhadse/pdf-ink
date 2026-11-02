@@ -4,7 +4,7 @@
  * EmbedPDF draws a stamp by asking the engine to render its appearance, but it asks as soon as the
  * annotation appears in the layer, before the create has been committed to PDFium, so the request fails
  * ("annotation not found") and the stamp stays an empty box until the page is reopened. This renderer
- * shows the picture's own bytes at once when they are known (a picked or pasted image), and otherwise asks
+ * shows the picture's own bytes at once when they are known (a picked image), and otherwise asks
  * the engine only once the annotation has been committed, asking again after each change of its size.
  */
 import { useEffect, useState } from "preact/hooks";
