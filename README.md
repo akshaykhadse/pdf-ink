@@ -59,7 +59,7 @@ for text selections instead, and shows backlinks only for links that carry a
 These are plugin additions on top of EmbedPDF: stylus mode and finger
 scrolling while a drawing tool is active, the eraser, the pen's side button,
 stroke smoothing, a canvas preview for the stroke being drawn (EmbedPDF's SVG
-preview lays the page out on every sample), feeding the pen's full sample rate to strokes, a predicted tail ahead of the stroke (browser pointer prediction, hides a frame or two of latency), grouped undo
+preview lays the page out on every sample), feeding the pen's full sample rate to strokes, grouped undo
 for multi-deletes, link formatting, backlinks, the sidecar note and the
 full-screen mode.
 

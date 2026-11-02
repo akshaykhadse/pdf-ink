@@ -13,7 +13,6 @@ import { useLayoutEffect, useRef } from "preact/hooks";
 import { PdfAnnotationSubtype, PdfBlendMode, Rect } from "@embedpdf/models";
 import { createRenderer, useRegisterRenderers } from "@embedpdf/plugin-annotation/preact";
 import { stampRenderer } from "./stamp";
-import { tipPoints } from "./tip";
 
 interface Point {
 	x: number;
@@ -43,9 +42,6 @@ interface Cover {
 
 function CanvasInkPreview({ data, bounds, scale }: { data: InkPreviewData; bounds: Rect; scale: number }) {
 	const ref = useRef<HTMLCanvasElement>(null);
-	/** A second canvas for the predicted tail, cleared and redrawn on every sample (see tip.ts). */
-	const tipRef = useRef<HTMLCanvasElement>(null);
-	const tipDrawn = useRef(false);
 	/** The page area the canvas covers, in PDF points. */
 	const cover = useRef<Cover | null>(null);
 	/** How many points of each stroke are on the canvas already. */
@@ -71,18 +67,14 @@ function CanvasInkPreview({ data, bounds, scale }: { data: InkPreviewData; bound
 			const page = pageSize.current;
 			const next: Cover = { x0: Math.max(0, need.x0 - m), y0: Math.max(0, need.y0 - m), x1: Math.min(page.w, need.x1 + m), y1: Math.min(page.h, need.y1 + m) };
 			const w = Math.max(1, (next.x1 - next.x0) * scale), h = Math.max(1, (next.y1 - next.y0) * scale);
-			for (const cv of [canvas, tipRef.current]) {
-				if (!cv) continue;
-				cv.width = Math.ceil(w * dpr);
-				cv.height = Math.ceil(h * dpr);
-				cv.style.left = `${next.x0 * scale}px`;
-				cv.style.top = `${next.y0 * scale}px`;
-				cv.style.width = `${w}px`;
-				cv.style.height = `${h}px`;
-			}
+			canvas.width = Math.ceil(w * dpr);
+			canvas.height = Math.ceil(h * dpr);
+			canvas.style.left = `${next.x0 * scale}px`;
+			canvas.style.top = `${next.y0 * scale}px`;
+			canvas.style.width = `${w}px`;
+			canvas.style.height = `${h}px`;
 			cover.current = next;
 			drawn.current = [];
-			tipDrawn.current = false;
 		}
 		const cv = cover.current!;
 		ctx.setTransform(dpr * scale, 0, 0, dpr * scale, -cv.x0 * dpr * scale, -cv.y0 * dpr * scale);
@@ -104,38 +96,9 @@ function CanvasInkPreview({ data, bounds, scale }: { data: InkPreviewData; bound
 			ctx.stroke();
 			drawn.current[i] = pts.length;
 		});
-		// The predicted tail: from the last real point along the browser's prediction, on its own canvas.
-		const tc = tipRef.current?.getContext("2d");
-		if (tc) {
-			if (tipDrawn.current) {
-				tc.setTransform(1, 0, 0, 1, 0, 0);
-				tc.clearRect(0, 0, tc.canvas.width, tc.canvas.height);
-				tipDrawn.current = false;
-			}
-			const last = data.inkList.at(-1)?.points.at(-1);
-			const tail = last ? tipPoints(last, scale, performance.now()) : [];
-			if (last && tail.length) {
-				tipDrawn.current = true;
-				tc.setTransform(dpr * scale, 0, 0, dpr * scale, -cv.x0 * dpr * scale, -cv.y0 * dpr * scale);
-				tc.lineCap = "round";
-				tc.lineJoin = "round";
-				tc.strokeStyle = ctx.strokeStyle;
-				tc.lineWidth = width;
-				tc.globalAlpha = data.opacity ?? 1;
-				tc.beginPath();
-				tc.moveTo(last.x, last.y);
-				for (const p of tail) tc.lineTo(p.x, p.y);
-				tc.stroke();
-			}
-		}
 	});
 
-	return (
-		<>
-			<canvas ref={ref} class="pdf-ink-stroke-preview" style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }} />
-			<canvas ref={tipRef} class="pdf-ink-stroke-tip" style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }} />
-		</>
-	);
+	return <canvas ref={ref} class="pdf-ink-stroke-preview" style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }} />;
 }
 
 const renderers = [
