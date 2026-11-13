@@ -24,9 +24,11 @@ import { CapturePluginPackage, MarqueeCapture } from "@embedpdf/plugin-capture/p
 import { ExportPluginPackage } from "@embedpdf/plugin-export/preact";
 import { Toolbar } from "./toolbar";
 import { PointerGuard } from "./guard";
+import { PenLog } from "./pen-log";
 import type { Settings } from "./settings";
 import { installInkSmoothing } from "./ink";
 import { PdfInkRenderers } from "./ink-preview";
+import { installAnnotationMemo } from "./memo-annotations";
 import { forgetStampSource, rememberStampSource } from "./stamp";
 import { ToolController } from "./tools";
 import { Backlink, LinkVars, PageRect, fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "./links";
@@ -48,6 +50,8 @@ export interface ViewerHost {
 	openSidecar(): void;
 	/** The reading position moved (throttled); the host remembers it per file. */
 	positionChanged(pos: ReadingPosition): void;
+	/** Appends text to the pen timing log (a diagnostic). */
+	penLog(text: string): void;
 }
 
 /** Where the reader is: the topmost visible page and the offset into it in PDF points. */
@@ -91,6 +95,7 @@ export function settle<T>(task: { toPromise?: () => Promise<T>; wait: (ok: (v: T
 }
 
 export function mountViewer(el: HTMLElement, props: ViewerProps): { unmount: () => void } {
+	installAnnotationMemo(!(globalThis as any).__pdfInkNoMemo);
 	render(<App {...props} />, el);
 	return { unmount: () => render(null, el) };
 }
@@ -200,6 +205,8 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 	useEffect(() => {
 		const root = rootRef.current;
 		if (!root || !registry) return;
+		// Before the guard, so its listeners see events first and the guard's work counts in the timings.
+		const penLog = new PenLog(root, tools, host.penLog, () => host.settings().penTimingLog);
 		const guard = new PointerGuard(root, tools, host.settings, host.onChange);
 		const annotations: any = (registry.getPlugin("annotation") as any)?.provides();
 		const scoped = annotations?.forDocument(documentId);
@@ -272,6 +279,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 			offCapture?.();
 			offTools();
 			guard.destroy();
+			penLog.destroy();
 			tools.destroy();
 		};
 	}, [documentId, registry]);
