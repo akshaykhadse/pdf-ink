@@ -140,6 +140,21 @@ export default class PdfInkPlugin extends Plugin {
 		return p ? { page: p.page, y: p.y } : null;
 	}
 
+	/** Pen timing log (diagnostic): appended to pen-timing.log in the plugin folder, one write at a time. */
+	private penLogQueue: Promise<void> = Promise.resolve();
+	appendPenLog(text: string): Promise<void> {
+		const dir = this.manifest.dir ?? normalizePath(`${this.app.vault.configDir}/plugins/${this.manifest.id}`);
+		const path = normalizePath(`${dir}/pen-timing.log`);
+		const adapter = this.app.vault.adapter;
+		this.penLogQueue = this.penLogQueue
+			.then(async () => {
+				if (await adapter.exists(path)) await adapter.append(path, text);
+				else await adapter.write(path, text);
+			})
+			.catch((e) => console.warn("[pdf-ink] pen log", e));
+		return this.penLogQueue;
+	}
+
 	rememberPosition(path: string, pos: ReadingPosition) {
 		const old = this.positions[path];
 		if (old && old.page === pos.page && old.y === pos.y) return;

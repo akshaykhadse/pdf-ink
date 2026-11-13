@@ -76,7 +76,7 @@ window.run = async (pdfUrl = "/sample.pdf") => {
 		return createPdfiumEngine(url, { fontFallback: null });
 	})();
 	window.positions ??= {};
-	const plugin = { settings: window.settings, saveSettings: async () => {}, getEngine: () => enginePromise, positionFor: (p: string) => window.positions[p] ?? null, rememberPosition: (p: string, pos: any) => (window.positions[p] = pos) };
+	const plugin = { settings: window.settings, saveSettings: async () => {}, getEngine: () => enginePromise, positionFor: (p: string) => window.positions[p] ?? null, rememberPosition: (p: string, pos: any) => (window.positions[p] = pos), appendPenLog: async (t: string) => void ((window as any).penLog = ((window as any).penLog ?? "") + t) };
 	const leaf: any = { app };
 	const view = new PdfInkView(leaf, plugin as any);
 	(view as any).file = file;

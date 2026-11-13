@@ -645,6 +645,15 @@ const files = {
 	check("the reading position is remembered and restored on reopen", posBefore && remembered && remembered.page === posBefore.page && posAfter && posAfter.page === posBefore.page && Math.abs(posAfter.y - posBefore.y) < 3, `before ${JSON.stringify(posBefore)}, stored ${JSON.stringify(remembered)}, after ${JSON.stringify(posAfter)}`);
 
 	await page.screenshot({ path: path.join(out, "viewer.png") });
+	// Pen timing log (diagnostic): off by default, one JSON line per stroke when on.
+	await tool("pen");
+	await page.evaluate(() => (window.settings.penTimingLog = true));
+	await stroke(x + 40, y + 60);
+	await page.waitForTimeout(2400);
+	const log = await page.evaluate(() => (window.penLog ?? "").trim().split("\n").map((l) => JSON.parse(l)));
+	const strokeLine = log.find((l) => l.n === 1);
+	check("the pen timing log writes a session line and one line per stroke", log[0]?.session && strokeLine && strokeLine.moves > 0 && typeof strokeLine.downFrame === "number" && typeof strokeLine.firstMoveDt === "number", JSON.stringify(log).slice(0, 300));
+	await page.evaluate(() => (window.settings.penTimingLog = false));
 	await browser.close();
 	if (failed) process.exit(1);
 })().catch((e) => {
