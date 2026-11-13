@@ -37,6 +37,8 @@ export interface Settings {
 	smoothStrokes: boolean;
 	/** Feed the pen's coalesced samples to the stroke (browsers deliver one move per frame). */
 	fullPenRate: boolean;
+	/** Pass pen samples on from pointerrawupdate as they arrive, instead of once per frame. */
+	earlyPenSamples: boolean;
 	/** Diagnostic: write per-stroke pen timings to pen-timing.log in the plugin folder. */
 	penTimingLog: boolean;
 	autosave: boolean;
@@ -68,6 +70,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	stylusMode: false,
 	smoothStrokes: true,
 	fullPenRate: true,
+	earlyPenSamples: true,
 	penTimingLog: false,
 	autosave: true,
 	openByDefault: false,
@@ -143,6 +146,7 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
 		stylusMode: typeof r.stylusMode === "boolean" ? r.stylusMode : d.stylusMode,
 		smoothStrokes: typeof r.smoothStrokes === "boolean" ? r.smoothStrokes : d.smoothStrokes,
 		fullPenRate: typeof r.fullPenRate === "boolean" ? r.fullPenRate : d.fullPenRate,
+		earlyPenSamples: typeof r.earlyPenSamples === "boolean" ? r.earlyPenSamples : d.earlyPenSamples,
 		penTimingLog: typeof r.penTimingLog === "boolean" ? r.penTimingLog : d.penTimingLog,
 		autosave: typeof r.autosave === "boolean" ? r.autosave : d.autosave,
 		openByDefault: typeof r.openByDefault === "boolean" ? r.openByDefault : d.openByDefault,
@@ -181,6 +185,7 @@ export class PdfInkSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Stylus mode on by default").setDesc("Off: fingers draw too. On: fingers pan and scroll while only the pen draws. Can also be toggled on the toolbar.").addToggle((t) => t.setValue(s.stylusMode).onChange(async (v) => ((s.stylusMode = v), save())));
 		new Setting(containerEl).setName("Smooth strokes").setDesc("Resample each stroke along a curve through the pen's samples (not native to EmbedPDF, which draws straight segments).").addToggle((t) => t.setValue(s.smoothStrokes).onChange(async (v) => ((s.smoothStrokes = v), save())));
 		new Setting(containerEl).setName("Use the pen's full sample rate").setDesc("Feed the browser's coalesced pointer samples to the stroke (not native to EmbedPDF).").addToggle((t) => t.setValue(s.fullPenRate).onChange(async (v) => ((s.fullPenRate = v), save())));
+		new Setting(containerEl).setName("Early pen samples").setDesc("Pass each real pen sample to the stroke as soon as it arrives (pointerrawupdate) instead of once per frame. No prediction. Not native to EmbedPDF.").addToggle((t) => t.setValue(s.earlyPenSamples).onChange(async (v) => ((s.earlyPenSamples = v), save())));
 		new Setting(containerEl).setName("Log pen timing").setDesc("Diagnostic: write the timings of each pen stroke to pen-timing.log in the plugin folder (up to 400 strokes per opened PDF).").addToggle((t) => t.setValue(s.penTimingLog).onChange(async (v) => ((s.penTimingLog = v), save())));
 		new Setting(containerEl).setName("Eraser size").setDesc("Diameter in pixels.").addSlider((sl) => sl.setLimits(6, 120, 2).setValue(s.eraserSize).setDynamicTooltip().onChange(async (v) => ((s.eraserSize = v), save())));
 

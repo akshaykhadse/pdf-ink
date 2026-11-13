@@ -33,7 +33,7 @@ window.run = async (pdfUrl = "/sample.pdf") => {
 	window.notes ??= {};
 	window.links ??= [];
 	window.opened = [];
-	(navigator as any).clipboard = { writeText: async (t: string) => void window.clipboard.push(t) };
+	Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => void window.clipboard.push(t) } });
 	const files: Record<string, any> = {};
 	const app = {
 		workspace: {

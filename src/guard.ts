@@ -11,6 +11,8 @@
  *  - Full pen sample rate: browsers deliver one pointermove per frame and fold
  *    the rest into getCoalescedEvents(); EmbedPDF reads only the event itself,
  *    so the folded samples are re-dispatched ahead of it.
+ *  - Early samples: the same real samples are taken from pointerrawupdate,
+ *    which fires as they arrive instead of once per frame (no prediction).
  *  - Android reports the pen as touch events too, and Obsidian's edge swipe
  *    (which opens the side panels) listens to those: the pen's own touch
  *    events are stopped while it is on the page.
@@ -80,6 +82,8 @@ export class PointerGuard {
 	private penAt: { id: number; x: number; y: number } | null = null;
 	/** True while the coalesced samples of a move are being re-dispatched. */
 	private replaying = false;
+	/** Pointers whose samples this stroke already reached EmbedPDF through pointerrawupdate. */
+	private readonly rawFed = new Set<number>();
 	/** How each active touch was classified when it landed (stylus mode may change mid-touch). */
 	/** What each touch is: a finger (scrolls), a pen stand-in (draws), or an extra touch while something already draws (ignored). */
 	private readonly kinds = new Map<number, "finger" | "pen" | "extra">();
@@ -100,6 +104,7 @@ export class PointerGuard {
 		};
 		on("pointerdown", (e) => this.onDown(e));
 		on("pointermove", (e) => this.onMove(e));
+		on("pointerrawupdate", (e) => this.onRawUpdate(e));
 		on("pointerup", (e) => this.onUp(e));
 		on("pointercancel", (e) => this.onUp(e));
 		on("pointerleave", (e) => {
@@ -220,6 +225,7 @@ export class PointerGuard {
 			if (this.scroller?.id === e.pointerId) this.scroller = null;
 		} else {
 			this.pens.delete(e.pointerId);
+			this.rawFed.delete(e.pointerId);
 			if (this.erasing?.id === e.pointerId) this.endEraserStroke();
 			if (this.penAt?.id === e.pointerId) this.penAt = null;
 		}
@@ -279,11 +285,62 @@ export class PointerGuard {
 		this.eraseAt(e.clientX, e.clientY);
 	}
 
+	private inkTool(): boolean {
+		const tool = this.tools.tool;
+		return tool === "pen" || tool === "marker";
+	}
+
+	/**
+	 * Early samples (not native): Chromium delivers pointermove once per frame,
+	 * just before drawing it, so each sample waits up to a frame before EmbedPDF
+	 * sees it. pointerrawupdate carries the same real samples as soon as they
+	 * arrive; they are passed on as pointermoves at once, and the frame-aligned
+	 * pointermove that repeats them is then kept from EmbedPDF.
+	 */
+	private onRawUpdate(e: PointerEvent) {
+		if (!e.isTrusted || !this.settings().earlyPenSamples || !this.inkTool()) return;
+		if (e.pointerType === "touch" && this.isFinger(e)) return;
+		if (!this.pens.has(e.pointerId) || this.pens.get(e.pointerId) || e.buttons === 0) return;
+		const events = this.settings().fullPenRate && typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
+		this.rawFed.add(e.pointerId);
+		this.dispatchSamples(e, events.length ? events : [e]);
+	}
+
+	/** Re-dispatches samples as pointermoves on the event's target (EmbedPDF reads only the event itself). */
+	private dispatchSamples(e: PointerEvent, samples: PointerEvent[]) {
+		if (!(e.target instanceof Element)) return;
+		this.replaying = true;
+		try {
+			for (const c of samples) {
+				e.target.dispatchEvent(
+					new PointerEvent("pointermove", {
+						bubbles: true,
+						cancelable: true,
+						composed: true,
+						clientX: c.clientX,
+						clientY: c.clientY,
+						screenX: c.screenX,
+						screenY: c.screenY,
+						pointerId: e.pointerId,
+						pointerType: e.pointerType,
+						isPrimary: e.isPrimary,
+						buttons: e.buttons,
+						button: -1,
+						pressure: c.pressure,
+						tiltX: c.tiltX,
+						tiltY: c.tiltY,
+					})
+				);
+			}
+		} finally {
+			this.replaying = false;
+		}
+	}
+
 	private replayCoalesced(e: PointerEvent) {
 		if (this.replaying || !e.isTrusted || typeof e.getCoalescedEvents !== "function") return;
 		if (!this.settings().fullPenRate) return;
-		const tool = this.tools.tool;
-		if ((tool !== "pen" && tool !== "marker") || !(e.target instanceof Element)) return;
+		if (!this.inkTool() || !(e.target instanceof Element)) return;
 		const events = e.getCoalescedEvents();
 		if (events.length < 2) return;
 		this.replaying = true;
@@ -349,6 +406,11 @@ export class PointerGuard {
 		}
 		if (down) {
 			if (!this.pens.get(e.pointerId)) {
+				if (this.rawFed.has(e.pointerId) && e.isTrusted && this.inkTool()) {
+					// Its samples already went in through pointerrawupdate.
+					e.stopPropagation();
+					return;
+				}
 				this.replayCoalesced(e);
 				return;
 			}
