@@ -1,5 +1,5 @@
 // Plugin settings: tool styles, stylus behaviour, link templates and the sidecar.
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, PluginSettingTab, Setting } from "obsidian";
 import type PdfInkPlugin from "./main";
 
 /** A drawing tool's current style. */
@@ -87,6 +87,11 @@ export const DEFAULT_SETTINGS: Settings = {
 	sidecarSuffix: "",
 	fullscreenHidesChrome: true,
 };
+
+/** A fresh copy of the defaults that shares no arrays or objects with DEFAULT_SETTINGS. */
+export function defaultSettings(): Settings {
+	return normalizeSettings(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
+}
 
 const MIN_WIDTH = 0.25;
 const MAX_WIDTH = 40;
@@ -215,9 +220,8 @@ export class PdfInkSettingTab extends PluginSettingTab {
 			d.addOptions({ clipboard: "Clipboard", sidecar: "Sidecar note", both: "Clipboard and sidecar note" }).setValue(s.linkTarget).onChange(async (v) => ((s.linkTarget = v as Settings["linkTarget"]), save()))
 		);
 		const formatsSetting = (name: string, desc: string, get: () => LinkFormat[], set: (v: LinkFormat[]) => void) =>
-			new Setting(containerEl).setName(name).setDesc(desc).addTextArea((t) => {
-				t.inputEl.rows = 6;
-				t.inputEl.cols = 50;
+			new Setting(containerEl).setName(name).setDesc(desc).setClass("pdf-ink-setting-stacked").addTextArea((t) => {
+				t.inputEl.rows = 4;
 				t.setValue(get().map((f) => `${f.name}: ${f.template.replace(/\n/g, "\\n")}`).join("\n")).onChange(async (v) => {
 					const parsed = v
 						.split("\n")
@@ -252,5 +256,49 @@ export class PdfInkSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl).setName("Full screen").setHeading();
 		new Setting(containerEl).setName("Hide Obsidian's bars in full screen").setDesc("Also hide the status bar, ribbon and mobile navigation while a PDF is full screen.").addToggle((t) => t.setValue(s.fullscreenHidesChrome).onChange(async (v) => ((s.fullscreenHidesChrome = v), save())));
+
+		new Setting(containerEl).setName("Reset").setHeading();
+		new Setting(containerEl)
+			.setName("Reset all settings to defaults")
+			.setDesc("Restores every setting on this page. Annotations and reading positions are kept.")
+			.addButton((b) =>
+				b
+					.setButtonText("Reset to defaults")
+					.setWarning()
+					.onClick(() =>
+						new ConfirmModal(this.app, "Reset all PDF Ink settings to their defaults?", "Reset", async () => {
+							Object.assign(this.plugin.settings, defaultSettings());
+							await save();
+							this.display();
+						}).open()
+					)
+			);
+	}
+}
+
+/** A yes/no dialog; `onConfirm` runs only on the confirm button. */
+class ConfirmModal extends Modal {
+	constructor(app: App, private readonly message: string, private readonly confirmText: string, private readonly onConfirm: () => void | Promise<void>) {
+		super(app);
+	}
+
+	onOpen(): void {
+		this.titleEl.setText("Reset settings");
+		this.contentEl.createEl("p", { text: this.message });
+		new Setting(this.contentEl)
+			.addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
+			.addButton((b) =>
+				b
+					.setButtonText(this.confirmText)
+					.setWarning()
+					.onClick(() => {
+						this.close();
+						void this.onConfirm();
+					})
+			);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }

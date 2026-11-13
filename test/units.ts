@@ -1,7 +1,7 @@
 // Pure-function checks, run with node after bundling (test/out/units.cjs).
 import { smoothStroke } from "../src/ink";
 import { fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "../src/links";
-import { normalizeSettings, parseColors, parseNumbers } from "../src/settings";
+import { DEFAULT_SETTINGS, defaultSettings, normalizeSettings, parseColors, parseNumbers } from "../src/settings";
 import { annotationHit } from "../src/guard";
 import { dotSize } from "../src/toolbar";
 
@@ -31,6 +31,11 @@ check("parseColors keeps valid hex only", JSON.stringify(parseColors("#FF0000, r
 const s = normalizeSettings({ pen: { color: "nope", width: 500, opacity: 2 } as any, penWidths: [], textLinkFormats: [{ name: "x" }] as any });
 check("normalizeSettings repairs bad values", s.pen.color === "#1e1e1e" && s.pen.width === 40 && s.pen.opacity === 1 && s.penWidths.length === 3 && s.textLinkFormats.length === 3, s.pen);
 check("normalizeSettings keeps good values", normalizeSettings({ stylusMode: false, linkTarget: "sidecar", sidecarFolder: "/notes/" }).stylusMode === false && normalizeSettings({ linkTarget: "sidecar" }).linkTarget === "sidecar" && normalizeSettings({ sidecarFolder: "/notes/" }).sidecarFolder === "notes");
+const fresh = defaultSettings();
+fresh.penColors.push("#000000");
+fresh.textLinkFormats[0].template = "changed";
+fresh.pen.width = 9;
+check("defaultSettings returns a copy that shares nothing with the defaults", DEFAULT_SETTINGS.penColors.length === 6 && DEFAULT_SETTINGS.textLinkFormats[0].template.startsWith("[[") && DEFAULT_SETTINGS.pen.width === 2 && JSON.stringify(defaultSettings()) === JSON.stringify(DEFAULT_SETTINGS));
 
 // ink
 const sm = smoothStroke([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 20, y: 10 }]);

@@ -47,6 +47,9 @@ export class TFile {
 	extension = "";
 }
 export class Plugin {}
+export class Modal {
+	constructor(_app: any) {}
+}
 export class PluginSettingTab {
 	constructor(_app: any, _plugin: any) {}
 }

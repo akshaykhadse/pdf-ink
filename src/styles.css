@@ -541,3 +541,30 @@ body.pdf-ink-fullscreen-hide-chrome .mobile-toolbar,
 body.pdf-ink-fullscreen-hide-chrome .workspace-ribbon {
 	display: none !important;
 }
+
+/* Settings with a large textarea: name and description on top, full-width textarea below
+   (side by side, the textarea squeezed the description into a one-letter column). */
+.setting-item.pdf-ink-setting-stacked {
+	flex-direction: column;
+	flex-wrap: nowrap;
+	align-items: stretch;
+	gap: var(--size-4-2, 8px);
+}
+.setting-item.pdf-ink-setting-stacked > .setting-item-info {
+	margin-inline-end: 0;
+	width: 100%;
+	flex: 0 0 auto;
+}
+.setting-item.pdf-ink-setting-stacked > .setting-item-control {
+	width: 100%;
+	flex: 0 0 auto;
+	justify-content: stretch;
+}
+.setting-item.pdf-ink-setting-stacked textarea {
+	width: 100%;
+	max-width: none;
+	min-height: 6em;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-small);
+	resize: vertical;
+}
