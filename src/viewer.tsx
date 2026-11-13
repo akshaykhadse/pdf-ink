@@ -206,7 +206,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		const root = rootRef.current;
 		if (!root || !registry) return;
 		// Before the guard, so its listeners see events first and the guard's work counts in the timings.
-		const penLog = new PenLog(root, tools, host.penLog, () => host.settings().penTimingLog, () => host.settings().earlyPenSamples);
+		const penLog = new PenLog(root, tools, host.penLog, () => host.settings().penTimingLog);
 		const guard = new PointerGuard(root, tools, host.settings, host.onChange);
 		const annotations: any = (registry.getPlugin("annotation") as any)?.provides();
 		const scoped = annotations?.forDocument(documentId);

@@ -30,9 +30,6 @@ interface Stroke {
 	longBefore: number;
 	longDuring: number;
 	pressure0: number;
-	raws: number;
-	rawQueue: number[];
-	rawFrames: number[];
 	/** The page under the pen, or -1. */
 	page: number;
 }
@@ -59,7 +56,7 @@ export class PenLog {
 	private readonly win: Window;
 	private headed = false;
 
-	constructor(private readonly root: HTMLElement, private readonly tools: ToolController, private readonly write: (text: string) => void, private readonly enabled: () => boolean, private readonly early: () => boolean = () => false) {
+	constructor(private readonly root: HTMLElement, private readonly tools: ToolController, private readonly write: (text: string) => void, private readonly enabled: () => boolean) {
 		this.win = root.ownerDocument.defaultView ?? window;
 		const on = (type: string, fn: (e: PointerEvent) => void, target: EventTarget = root) => {
 			const l = fn as EventListener;
@@ -68,7 +65,6 @@ export class PenLog {
 		};
 		on("pointerdown", (e) => this.onDown(e));
 		on("pointermove", (e) => this.onMove(e));
-		on("pointerrawupdate", (e) => this.onRaw(e));
 		on("pointerup", (e) => this.onUp(e, false), this.win);
 		on("pointercancel", (e) => this.onUp(e, true), this.win);
 		const PO = (this.win as any).PerformanceObserver;
@@ -135,9 +131,6 @@ export class PenLog {
 			longBefore: this.longSum(e.timeStamp - 500, e.timeStamp),
 			longDuring: 0,
 			pressure0: e.pressure,
-			raws: 0,
-			rawQueue: [],
-			rawFrames: [],
 			page: Number((e.target as Element | null)?.closest?.(".pdf-ink-page")?.getAttribute("data-page-index") ?? -1),
 		};
 		this.header();
@@ -180,17 +173,6 @@ export class PenLog {
 		}
 	}
 
-	private onRaw(e: PointerEvent) {
-		const s = this.stroke;
-		if (!s || !e.isTrusted || e.buttons === 0) return;
-		s.raws++;
-		s.rawQueue.push(performance.now() - e.timeStamp);
-		if (s.raws <= 120) {
-			const stamp = e.timeStamp;
-			this.win.requestAnimationFrame(() => s.rawFrames.push(performance.now() - stamp));
-		}
-	}
-
 	private onUp(e: PointerEvent, cancelled: boolean) {
 		const s = this.stroke;
 		if (!s) return;
@@ -228,10 +210,6 @@ export class PenLog {
 					maxSampleGap: r1(s.maxSampleGap),
 					moveQueue: stats(s.queue),
 					moveFrame: stats(s.frames),
-					raws: s.raws,
-					rawQueue: stats(s.rawQueue),
-					rawFrame: stats(s.rawFrames),
-					early: this.early(),
 					longBefore: r1(s.longBefore),
 					longDuring: r1(s.longDuring),
 					duration: r1(duration),

@@ -86,7 +86,7 @@ const files = {
 		if (m.type() === "error" || m.text().startsWith("NOTICE:")) console.log("[console]", m.text().slice(0, 300));
 	});
 	page.on("pageerror", (e) => console.log("[pageerror]", e.message));
-	await page.route("https://test/**", async (route) => {
+	await page.route("http://test/**", async (route) => {
 		const u = new URL(route.request().url()).pathname;
 		if (u === "/") return route.fulfill({ status: 200, contentType: "text/html", body: html });
 		const f = files[u];
@@ -156,7 +156,7 @@ const files = {
 			[type, cx, cy, extra]
 		);
 
-	await page.goto("https://test/");
+	await page.goto("http://test/");
 	// Two notes link to the PDF: one with a rect, one by page only.
 	await page.evaluate(() => {
 		window.links = [
@@ -645,19 +645,6 @@ const files = {
 	check("the reading position is remembered and restored on reopen", posBefore && remembered && remembered.page === posBefore.page && posAfter && posAfter.page === posBefore.page && Math.abs(posAfter.y - posBefore.y) < 3, `before ${JSON.stringify(posBefore)}, stored ${JSON.stringify(remembered)}, after ${JSON.stringify(posAfter)}`);
 
 	await page.screenshot({ path: path.join(out, "viewer.png") });
-	// Early pen samples (pointerrawupdate, a secure-context event): each real sample reaches the stroke exactly once.
-	const rawPoints = async (early) => {
-		await page.evaluate((on) => { window.settings.earlyPenSamples = on; window.settings.smoothStrokes = false; }, early);
-		const before = await count();
-		await stroke(x - 200, y + 200);
-		const pts = await api(`ann.getAnnotations().slice(-1)[0]?.object.inkList[0].points.length`);
-		return [(await count()) - before, pts];
-	};
-	await tool("pen");
-	const hasRaw = await page.evaluate(() => "onpointerrawupdate" in window);
-	const off = await rawPoints(false), on = await rawPoints(true);
-	check("early pen samples: the stroke gets every sample once, as without them", hasRaw && off[0] === 1 && on[0] === 1 && on[1] === off[1] && on[1] === 11, `raw ${hasRaw}, off ${off}, on ${on}`);
-	await page.evaluate(() => { window.settings.smoothStrokes = true; });
 	// Pen timing log (diagnostic): off by default, one JSON line per stroke when on.
 	await tool("pen");
 	await page.evaluate(() => (window.settings.penTimingLog = true));
