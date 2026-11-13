@@ -30,6 +30,8 @@ interface Stroke {
 	longBefore: number;
 	longDuring: number;
 	pressure0: number;
+	/** The page under the pen, or -1. */
+	page: number;
 }
 
 const MAX_STROKES = 400;
@@ -129,6 +131,7 @@ export class PenLog {
 			longBefore: this.longSum(e.timeStamp - 500, e.timeStamp),
 			longDuring: 0,
 			pressure0: e.pressure,
+			page: Number((e.target as Element | null)?.closest?.(".pdf-ink-page")?.getAttribute("data-page-index") ?? -1),
 		};
 		this.header();
 		this.stroke = s;
@@ -181,7 +184,8 @@ export class PenLog {
 			s.longDuring = this.longSum(s.downStamp, s.downStamp + duration);
 			let onPage: number | null = null;
 			try {
-				onPage = this.tools.annotations()?.getAnnotations?.()?.length ?? null;
+				// Only this page's: listing every annotation in a big PDF is itself slow.
+				if (s.page >= 0) onPage = this.tools.annotations()?.getAnnotations?.({ pageIndex: s.page })?.length ?? null;
 			} catch {
 				/* ignore */
 			}
@@ -191,7 +195,8 @@ export class PenLog {
 					type: s.type,
 					tool: s.tool,
 					cancelled,
-					annotations: onPage,
+					page: s.page,
+					pageAnnotations: onPage,
 					sincePrevUp: r1(s.sincePrevUp),
 					sinceHover: r1(s.sinceHover),
 					downQueue: r1(s.downQueue),
