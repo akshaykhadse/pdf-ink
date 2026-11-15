@@ -87,6 +87,21 @@
 	pointer-events: none !important;
 }
 
+/*
+ * Pointer tool, text first: unselected annotations do not take presses, so a drag over
+ * a stroke or highlight selects the text beneath (the guard turns a tap back into a
+ * selection). A selected annotation's move/resize layer and menu are not first children,
+ * so they stay clickable; backlink boxes never take presses (the guard opens them on
+ * a tap); text being edited in a free-text annotation stays editable.
+ */
+.pdf-ink.is-pointer .pdf-ink-page-layers [data-no-interaction] > div:first-child * {
+	pointer-events: none !important;
+}
+.pdf-ink.is-pointer .pdf-ink-page-layers [data-no-interaction] > div:first-child [contenteditable="true"],
+.pdf-ink.is-pointer .pdf-ink-page-layers [data-no-interaction] > div:first-child [contenteditable="true"] * {
+	pointer-events: auto !important;
+}
+
 /* Stylus mode off with a drawing tool: fingers draw, pages must not pan. */
 .pdf-ink.is-touch-draw .pdf-ink-page-layers {
 	touch-action: none !important;
@@ -130,10 +145,6 @@
 	cursor: pointer;
 	box-shadow: none;
 	opacity: 0.8;
-}
-
-.pdf-ink-backlinks.is-clickable .pdf-ink-backlink {
-	pointer-events: auto;
 }
 
 .pdf-ink-backlink:hover {
