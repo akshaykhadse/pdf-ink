@@ -37,6 +37,19 @@ export class PdfInkView extends FileView {
 			void this.saveNow(true);
 			return false;
 		});
+		// Undo, redo and delete, unless a text box or an input has the keys.
+		const key = (fn: () => void) => () => {
+			const el: any = this.containerEl.ownerDocument.activeElement;
+			if (el?.isContentEditable || el?.tagName === "INPUT" || el?.tagName === "TEXTAREA") return true;
+			if (!this.handle) return true;
+			fn();
+			return false;
+		};
+		this.scope.register(["Mod"], "z", key(() => this.handle?.tools.undo()));
+		this.scope.register(["Mod", "Shift"], "z", key(() => this.handle?.tools.redo()));
+		this.scope.register(["Mod"], "y", key(() => this.handle?.tools.redo()));
+		this.scope.register([], "Delete", key(() => this.handle?.tools.deleteSelected()));
+		this.scope.register([], "Backspace", key(() => this.handle?.tools.deleteSelected()));
 		this.scope.register([], "Escape", () => {
 			if (!this.fullscreen) return true;
 			this.setFullscreen(false);
@@ -44,6 +57,11 @@ export class PdfInkView extends FileView {
 		});
 		this.requestAutosave = debounce(() => void this.saveNow(false), AUTOSAVE_QUIET_MS, true);
 		this.requestBacklinks = debounce(() => this.handle?.refreshBacklinks(), 400, true);
+	}
+
+	/** The open document's tools, once it is open. */
+	get tools() {
+		return this.handle?.tools ?? null;
 	}
 
 	getViewType() {

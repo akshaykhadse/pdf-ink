@@ -14,7 +14,7 @@
  *   shape         EmbedPDF's `lineArrow`, `line`, `square` or `circle` tool (native), by `settings.shapeKind`.
  */
 import type { Settings, ShapeKind, ShapeLine, TextFormat, ToolStyle } from "./settings";
-import { ALIGN_VALUE, LINE_END_VALUE, standardFont, strokePattern } from "./formats";
+import { ALIGN_VALUE, LINE_END_VALUE, lineStyleOf, standardFont, strokePattern } from "./formats";
 
 export type ToolId = "hand" | "pointer" | "pen" | "marker" | "textHighlight" | "text" | "shape" | "eraser" | "areaLink" | "image";
 
@@ -252,13 +252,17 @@ export class ToolController {
 		Object.assign(style, patch);
 		this.pushStyle(tool);
 		this.host.saveSettings();
-		// Restyle what is selected too, so a swatch tap recolours a selected stroke.
-		const ann = this.annotations();
-		for (const a of ann?.getSelectedAnnotations?.() ?? []) {
-			const o = a.object;
-			if (toolOfAnnotation(o) === tool) ann.updateAnnotation(o.pageIndex, o.id, this.annotationPatch(tool, patch));
-		}
 		this.notify();
+	}
+
+	/** Changes the width (font size for text) or opacity of one existing annotation: one undo step. */
+	restyle(o: any, patch: Partial<ToolStyle>) {
+		const tool = toolOfAnnotation(o);
+		if (!tool) return;
+		const p = this.annotationPatch(tool, patch);
+		// A shape keeps its own line style when its width changes.
+		if (tool === "shape" && patch.width !== undefined) Object.assign(p, strokePattern(lineStyleOf(o), patch.width));
+		this.annotations()?.updateAnnotation(o.pageIndex, o.id, p);
 	}
 
 	private annotationPatch(tool: ToolId, style: Partial<ToolStyle>): Record<string, unknown> {
@@ -314,8 +318,6 @@ export class ToolController {
 		Object.assign(s.textFormat, patch);
 		this.pushStyle("text");
 		this.host.saveSettings();
-		const ann = this.annotations();
-		for (const a of ann?.getSelectedAnnotations?.() ?? []) if (toolOfAnnotation(a.object) === "text") ann.updateAnnotation(a.object.pageIndex, a.object.id, this.textFormatPatch(s.textFormat));
 		this.notify();
 	}
 

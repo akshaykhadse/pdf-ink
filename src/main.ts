@@ -5,6 +5,20 @@ import { DEFAULT_SETTINGS, PdfInkSettingTab, Settings, normalizeSettings } from 
 import type { ReadingPosition } from "./viewer";
 import { PdfInkView, VIEW_TYPE } from "./view";
 import { openSidecar } from "./links";
+import type { ToolController, ToolId } from "./tools";
+
+const TOOL_COMMANDS: [ToolId, string][] = [
+	["hand", "Hand"],
+	["pointer", "Pointer"],
+	["pen", "Pen"],
+	["marker", "Highlighter"],
+	["textHighlight", "Text highlighter"],
+	["text", "Text"],
+	["shape", "Shapes"],
+	["eraser", "Eraser"],
+	["areaLink", "Area link"],
+	["image", "Image"],
+];
 
 export default class PdfInkPlugin extends Plugin {
 	settings: Settings = { ...DEFAULT_SETTINGS };
@@ -53,7 +67,18 @@ export default class PdfInkPlugin extends Plugin {
 				if (v.file) void openSidecar(this.app, this.settings, v.file, v.leaf).catch((e) => new Notice(`PDF Ink: ${e?.message ?? e}`));
 			}),
 		});
-		this.addCommand({ id: "toggle-stylus-mode", name: "Toggle stylus mode", checkCallback: withView((v) => (v as any).handle?.tools.setStylusMode(!this.settings.stylusMode)) });
+		const withTools = (fn: (tools: ToolController) => void) => (checking: boolean) => {
+			const tools = this.app.workspace.getActiveViewOfType(PdfInkView)?.tools;
+			if (!tools) return false;
+			if (!checking) fn(tools);
+			return true;
+		};
+		this.addCommand({ id: "toggle-stylus-mode", name: "Toggle stylus mode", checkCallback: withTools((t) => t.setStylusMode(!this.settings.stylusMode)) });
+		// One command per tool, so each can have a hotkey.
+		for (const [id, name] of TOOL_COMMANDS) this.addCommand({ id: `tool-${id}`, name: `Tool: ${name}`, checkCallback: withTools((t) => t.setTool(id)) });
+		this.addCommand({ id: "undo", name: "Undo", checkCallback: withTools((t) => t.undo()) });
+		this.addCommand({ id: "redo", name: "Redo", checkCallback: withTools((t) => t.redo()) });
+		this.addCommand({ id: "delete-selected", name: "Delete selected annotations", checkCallback: withTools((t) => t.deleteSelected()) });
 
 		this.registerEvent(
 			this.app.vault.on("rename", (file, oldPath) => {

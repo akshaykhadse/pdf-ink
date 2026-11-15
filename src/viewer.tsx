@@ -30,9 +30,9 @@ import { installInkSmoothing } from "./ink";
 import { PdfInkRenderers } from "./ink-preview";
 import { installAnnotationMemo } from "./memo-annotations";
 import { forgetStampSource, rememberStampSource } from "./stamp";
-import { FREETEXT, LINE, SQUARE, CIRCLE, SHAPE_TOOL, ToolController } from "./tools";
+import { FREETEXT, LINE, SQUARE, CIRCLE, SHAPE_TOOL, ToolController, toolOfAnnotation } from "./tools";
 import { fontFormat, lineStyleOf } from "./formats";
-import { LineStyleGlyph } from "./toolbar";
+import { LineStyleGlyph, dotSize } from "./toolbar";
 import { LINE_STYLES } from "./settings";
 import { TEXT_BOX_WIDTH, TEXT_PLACEHOLDER, fitTextBox, keepTapsInTextBox, textLineHeight } from "./text-box";
 import { Backlink, LinkVars, PageRect, fillTemplate, linkText, parseSubpath, rectFromParam, rectParam } from "./links";
@@ -478,6 +478,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 								<LineStyleGlyph style={ls} />
 							</button>
 						))}
+					{a && toolOfAnnotation(a) && <StyleControls o={a} tools={tools} settings={settings} />}
 					{a && (
 						<button class="pdf-ink-menu-item" aria-label="Copy link to annotation" onClick={() => copyLink(pageIndex, toRect(a.rect), a.custom?.text ?? a.contents ?? `p.${pageIndex + 1}`, settings.areaLinkFormats[0]?.template ?? "[[{{file}}#page={{page}}&rect={{rect}}]]", a.strokeColor ?? "")}>
 							<Icon name="link" />
@@ -576,5 +577,37 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 			</GlobalPointerProvider>
 		</div>
 		</AnnotationRendererProvider>
+	);
+}
+
+/**
+ * Width (or text size) and opacity of one selected annotation, behind a single
+ * menu button so the menu stays small. Each pick is one undo step.
+ */
+function StyleControls({ o, tools, settings }: { o: any; tools: ToolController; settings: Settings }) {
+	const [open, setOpen] = useState(false);
+	const tool = toolOfAnnotation(o);
+	const sizes = tool === "pen" ? settings.penWidths : tool === "marker" ? settings.markerWidths : tool === "shape" ? settings.shapeWidths : tool === "text" ? settings.textSizes : [];
+	const current = tool === "text" ? o.fontSize : o.strokeWidth;
+	const color = (tool === "text" ? o.fontColor : o.strokeColor) ?? "currentColor";
+	return (
+		<>
+			<button class={"pdf-ink-menu-item" + (open ? " is-active" : "")} aria-label="Width and opacity" aria-expanded={open} onClick={() => setOpen(!open)}>
+				<Icon name="sliders-horizontal|settings-2" />
+			</button>
+			{open && (
+				<div class="pdf-ink-menu-row pdf-ink-menu-style">
+					{sizes.map((w) => (
+						<button key={w} class={"pdf-ink-swatch" + (current === w ? " is-active" : "")} aria-label={tool === "text" ? `Text size ${w}` : `Width ${w}`} onClick={() => tools.restyle(o, { width: w })}>
+							{tool === "text" ? <span class="pdf-ink-size">{w}</span> : <span class="pdf-ink-bar" style={{ height: dotSize(w), background: color }} />}
+						</button>
+					))}
+					<span class="pdf-ink-opacity">
+						<Icon name="blend|droplet" />
+						<input type="range" min={5} max={100} step={5} value={Math.round((o.opacity ?? 1) * 100)} aria-label="Opacity" onChange={(e) => tools.restyle(o, { opacity: Number((e.target as HTMLInputElement).value) / 100 })} />
+					</span>
+				</div>
+			)}
+		</>
 	);
 }
