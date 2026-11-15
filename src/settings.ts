@@ -11,6 +11,10 @@ export interface ToolStyle {
 	opacity: number;
 }
 
+/** What the shape tool draws. */
+export type ShapeKind = "arrow" | "line" | "rectangle" | "ellipse";
+export const SHAPE_KINDS: readonly ShapeKind[] = ["arrow", "line", "rectangle", "ellipse"];
+
 /** A named link template; variables: {{file}} {{page}} {{rect}} {{text}} {{color}} {{path}}. */
 export interface LinkFormat {
 	name: string;
@@ -26,9 +30,23 @@ export interface Settings {
 	penWidths: number[];
 	/** Stroke widths offered on the toolbar for the freehand highlighter. */
 	markerWidths: number[];
+	/** Colours offered on the toolbar for the text tool. */
+	textColors: string[];
+	/** Font sizes in points offered on the toolbar for the text tool. */
+	textSizes: number[];
+	/** Colours offered on the toolbar for arrows, lines and shapes. */
+	shapeColors: string[];
+	/** Line widths in PDF points offered on the toolbar for arrows, lines and shapes. */
+	shapeWidths: number[];
 	pen: ToolStyle;
 	marker: ToolStyle;
 	textHighlight: ToolStyle;
+	/** The text tool; `width` is the font size in points. */
+	text: ToolStyle;
+	/** Arrows, lines and shapes; `width` is the line width. */
+	shape: ToolStyle;
+	/** What the shape tool draws. */
+	shapeKind: ShapeKind;
 	/** Eraser diameter in CSS pixels. */
 	eraserSize: number;
 	/** Stylus mode: fingers pan and scroll, only the pen draws. Toggled from the toolbar too. */
@@ -61,9 +79,16 @@ export const DEFAULT_SETTINGS: Settings = {
 	highlightColors: ["#ffe066", "#8ce99a", "#74c0fc", "#ffa8a8", "#e599f7", "#ffc078"],
 	penWidths: [1, 2, 4],
 	markerWidths: [8, 14, 24],
+	textColors: ["#1e1e1e", "#1971c2", "#e03131", "#2f9e44", "#f08c00", "#9c36b5"],
+	textSizes: [10, 14, 18, 24],
+	shapeColors: ["#1e1e1e", "#1971c2", "#e03131", "#2f9e44", "#f08c00", "#9c36b5"],
+	shapeWidths: [1, 2, 4],
 	pen: { color: "#1e1e1e", width: 2, opacity: 1 },
 	marker: { color: "#ffe066", width: 14, opacity: 0.5 },
 	textHighlight: { color: "#ffe066", width: 0, opacity: 1 },
+	text: { color: "#e03131", width: 14, opacity: 1 },
+	shape: { color: "#e03131", width: 2, opacity: 1 },
+	shapeKind: "arrow",
 	eraserSize: 20,
 	stylusMode: false,
 	smoothStrokes: true,
@@ -95,6 +120,8 @@ export function defaultSettings(): Settings {
 
 const MIN_WIDTH = 0.25;
 const MAX_WIDTH = 40;
+const MIN_FONT = 4;
+const MAX_FONT = 96;
 
 export function parseNumbers(text: string, min: number, max: number): number[] {
 	const out: number[] = [];
@@ -116,10 +143,10 @@ export function parseColors(text: string): string[] {
 
 const clamp = (n: unknown, lo: number, hi: number, fallback: number) => (typeof n === "number" && Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback);
 
-function style(s: Partial<ToolStyle> | undefined, d: ToolStyle, minWidth = MIN_WIDTH): ToolStyle {
+function style(s: Partial<ToolStyle> | undefined, d: ToolStyle, minWidth = MIN_WIDTH, maxWidth = MAX_WIDTH): ToolStyle {
 	return {
 		color: typeof s?.color === "string" && /^#[0-9a-f]{6}$/i.test(s.color) ? s.color.toLowerCase() : d.color,
-		width: clamp(s?.width, minWidth, MAX_WIDTH, d.width),
+		width: clamp(s?.width, minWidth, maxWidth, d.width),
 		opacity: clamp(s?.opacity, 0.05, 1, d.opacity),
 	};
 }
@@ -135,15 +162,22 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
 	const r: any = raw ?? {};
 	const d = DEFAULT_SETTINGS;
 	const list = (v: unknown, fallback: string[]) => (Array.isArray(v) ? parseColors(v.join(",")) : []).length ? parseColors((v as string[]).join(",")) : fallback;
-	const nums = (v: unknown, fallback: number[]) => (Array.isArray(v) && parseNumbers(v.join(","), MIN_WIDTH, MAX_WIDTH).length ? parseNumbers(v.join(","), MIN_WIDTH, MAX_WIDTH) : fallback);
+	const nums = (v: unknown, fallback: number[], lo = MIN_WIDTH, hi = MAX_WIDTH) => (Array.isArray(v) && parseNumbers(v.join(","), lo, hi).length ? parseNumbers(v.join(","), lo, hi) : fallback);
 	return {
 		penColors: list(r.penColors, d.penColors),
 		highlightColors: list(r.highlightColors, d.highlightColors),
 		penWidths: nums(r.penWidths, d.penWidths),
 		markerWidths: nums(r.markerWidths, d.markerWidths),
+		textColors: list(r.textColors, d.textColors),
+		textSizes: nums(r.textSizes, d.textSizes, MIN_FONT, MAX_FONT),
+		shapeColors: list(r.shapeColors, d.shapeColors),
+		shapeWidths: nums(r.shapeWidths, d.shapeWidths),
 		pen: style(r.pen, d.pen),
 		marker: style(r.marker, d.marker),
 		textHighlight: style(r.textHighlight, d.textHighlight, 0),
+		text: style(r.text, d.text, MIN_FONT, MAX_FONT),
+		shape: style(r.shape, d.shape),
+		shapeKind: SHAPE_KINDS.includes(r.shapeKind) ? r.shapeKind : d.shapeKind,
 		eraserSize: clamp(r.eraserSize, 6, 120, d.eraserSize),
 		stylusMode: typeof r.stylusMode === "boolean" ? r.stylusMode : d.stylusMode,
 		smoothStrokes: typeof r.smoothStrokes === "boolean" ? r.smoothStrokes : d.smoothStrokes,
@@ -202,10 +236,12 @@ export class PdfInkSettingTab extends PluginSettingTab {
 			);
 		colors("Pen colours", "Hex colours offered for the pen, separated by commas.", () => s.penColors, (v) => (s.penColors = v));
 		colors("Highlighter colours", "Hex colours offered for the freehand and text highlighters.", () => s.highlightColors, (v) => (s.highlightColors = v));
-		const widths = (name: string, desc: string, get: () => number[], set: (v: number[]) => void) =>
+		colors("Text colours", "Hex colours offered for the text tool.", () => s.textColors, (v) => (s.textColors = v));
+		colors("Shape colours", "Hex colours offered for arrows, lines, rectangles and ellipses.", () => s.shapeColors, (v) => (s.shapeColors = v));
+		const widths = (name: string, desc: string, get: () => number[], set: (v: number[]) => void, lo = MIN_WIDTH, hi = MAX_WIDTH) =>
 			new Setting(containerEl).setName(name).setDesc(desc).addText((t) =>
 				t.setValue(get().join(", ")).onChange(async (v) => {
-					const parsed = parseNumbers(v, MIN_WIDTH, MAX_WIDTH);
+					const parsed = parseNumbers(v, lo, hi);
 					if (parsed.length) {
 						set(parsed);
 						await save();
@@ -214,6 +250,8 @@ export class PdfInkSettingTab extends PluginSettingTab {
 			);
 		widths("Pen widths", `Stroke widths in PDF points offered for the pen (${MIN_WIDTH}–${MAX_WIDTH}).`, () => s.penWidths, (v) => (s.penWidths = v));
 		widths("Highlighter widths", "Stroke widths offered for the freehand highlighter.", () => s.markerWidths, (v) => (s.markerWidths = v));
+		widths("Shape line widths", `Line widths in PDF points offered for arrows, lines and shapes (${MIN_WIDTH}–${MAX_WIDTH}).`, () => s.shapeWidths, (v) => (s.shapeWidths = v));
+		widths("Text sizes", `Font sizes in points offered for the text tool (${MIN_FONT}–${MAX_FONT}).`, () => s.textSizes, (v) => (s.textSizes = v), MIN_FONT, MAX_FONT);
 
 		new Setting(containerEl).setName("Links").setHeading();
 		new Setting(containerEl).setName("Copied links go to").setDesc("The sidecar note is the note opened beside the PDF with 'Open sidecar note'.").addDropdown((d) =>

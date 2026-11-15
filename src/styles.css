@@ -579,3 +579,25 @@ body.pdf-ink-fullscreen-hide-chrome .workspace-ribbon {
 	font-size: var(--font-ui-small);
 	resize: vertical;
 }
+
+/* Text tool: the style button shows a letter in the text colour; sizes are numbers. */
+.pdf-ink-letter {
+	font-family: Helvetica, Arial, sans-serif;
+	font-size: 16px;
+	font-weight: 600;
+	line-height: 1;
+	text-shadow: 0 0 1px rgba(128, 128, 128, 0.6);
+}
+
+.pdf-ink button.pdf-ink-size {
+	font-size: var(--font-ui-smaller, 11px);
+	color: var(--text-normal);
+}
+
+/* A text box being typed in: show what does not fit yet (the box grows to fit when typing ends). */
+.pdf-ink-page [contenteditable="true"] {
+	overflow: visible !important;
+	min-width: 1ch;
+	-webkit-user-select: text !important;
+	user-select: text !important;
+}

@@ -8,7 +8,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { Icon } from "./icon";
-import type { Settings } from "./settings";
+import { SHAPE_KINDS, type Settings, type ShapeKind } from "./settings";
 import { STYLED_TOOLS, ToolController, ToolId } from "./tools";
 
 const MAX_LEVEL = 4;
@@ -27,10 +27,15 @@ const DRAW_TOOLS: ToolDef[] = [
 	{ id: "pen", icon: "pen-line|pencil", label: "Pen" },
 	{ id: "marker", icon: "highlighter", label: "Highlighter" },
 	{ id: "textHighlight", icon: "text-select|text-cursor-input|type", label: "Text highlighter" },
+	{ id: "text", icon: "type|text", label: "Text: tap the page to type, or drag a box" },
+	{ id: "shape", icon: "", label: "Shapes: drag to draw an arrow, line, rectangle or ellipse" },
 	{ id: "eraser", icon: "eraser", label: "Eraser" },
 	{ id: "areaLink", icon: "scan", label: "Area link" },
 	{ id: "image", icon: "image", label: "Image: tap the page to insert a picture" },
 ];
+
+export const SHAPE_ICON: Record<ShapeKind, string> = { arrow: "move-up-right|arrow-up-right", line: "minus|slash", rectangle: "square", ellipse: "circle" };
+const SHAPE_LABEL: Record<ShapeKind, string> = { arrow: "Arrow", line: "Line", rectangle: "Rectangle", ellipse: "Ellipse" };
 
 /** Thickness of the colour bar that stands for a stroke width in PDF points. */
 export function dotSize(width: number): number {
@@ -106,7 +111,7 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 
 	const toolButton = (t: ToolDef) => (
 		<button key={t.id} class={"pdf-ink-btn pdf-ink-tool" + (state.tool === t.id ? " is-active" : "")} aria-label={t.label} data-tool={t.id} onClick={() => pick(t.id)}>
-			<Icon name={t.icon} />
+			<Icon name={t.id === "shape" ? SHAPE_ICON[settings.shapeKind] : t.icon} />
 		</button>
 	);
 
@@ -184,7 +189,11 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 				{styled && (
 					<div class="pdf-ink-group">
 						<button class={"pdf-ink-btn pdf-ink-style" + (popover === "options" ? " is-open" : "")} aria-label="Tool options" onClick={() => setPopover(popover === "options" ? null : "options")}>
-							<span class="pdf-ink-bar" style={{ background: tools.style()?.color, height: dotSize(tools.style()?.width || 3), opacity: tools.style()?.opacity }} />
+							{state.tool === "text" ? (
+								<span class="pdf-ink-letter" style={{ color: tools.style()?.color, opacity: tools.style()?.opacity }}>A</span>
+							) : (
+								<span class="pdf-ink-bar" style={{ background: tools.style()?.color, height: dotSize(tools.style()?.width || 3), opacity: tools.style()?.opacity }} />
+							)}
 						</button>
 					</div>
 				)}
@@ -246,10 +255,19 @@ function ToolOptions({ tools, settings }: { tools: ToolController; settings: Set
 	const tool = tools.tool;
 	const style = tools.style(tool);
 	if (!style) return null;
-	const colors = tool === "pen" ? settings.penColors : settings.highlightColors;
-	const widths = tool === "pen" ? settings.penWidths : tool === "marker" ? settings.markerWidths : [];
+	const colors = tool === "pen" ? settings.penColors : tool === "text" ? settings.textColors : tool === "shape" ? settings.shapeColors : settings.highlightColors;
+	const widths = tool === "pen" ? settings.penWidths : tool === "marker" ? settings.markerWidths : tool === "shape" ? settings.shapeWidths : [];
 	return (
 		<div class="pdf-ink-tool-options">
+			{tool === "shape" && (
+				<div class="pdf-ink-group pdf-ink-shapes">
+					{SHAPE_KINDS.map((k) => (
+						<button key={k} class={"pdf-ink-swatch pdf-ink-shape-kind" + (settings.shapeKind === k ? " is-active" : "")} aria-label={SHAPE_LABEL[k]} data-shape={k} onClick={() => tools.setShapeKind(k)}>
+							<Icon name={SHAPE_ICON[k]} />
+						</button>
+					))}
+				</div>
+			)}
 			<div class="pdf-ink-group pdf-ink-swatches">
 				{colors.map((c) => (
 					<button key={c} class={"pdf-ink-swatch" + (style.color === c ? " is-active" : "")} aria-label={`Colour ${c}`} onClick={() => tools.setStyle(tool, { color: c })}>
@@ -262,6 +280,15 @@ function ToolOptions({ tools, settings }: { tools: ToolController; settings: Set
 					{widths.map((w) => (
 						<button key={w} class={"pdf-ink-swatch" + (style.width === w ? " is-active" : "")} aria-label={`Width ${w}`} onClick={() => tools.setStyle(tool, { width: w })}>
 							<span class="pdf-ink-bar" style={{ height: dotSize(w), background: style.color }} />
+						</button>
+					))}
+				</div>
+			)}
+			{tool === "text" && (
+				<div class="pdf-ink-group pdf-ink-sizes">
+					{settings.textSizes.map((size) => (
+						<button key={size} class={"pdf-ink-swatch pdf-ink-size" + (style.width === size ? " is-active" : "")} aria-label={`Text size ${size}`} onClick={() => tools.setStyle(tool, { width: size })}>
+							{size}
 						</button>
 					))}
 				</div>
