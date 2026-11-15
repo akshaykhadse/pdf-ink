@@ -250,14 +250,26 @@ export class PointerGuard {
 		return null;
 	}
 
-	/** Maps a client point to page coordinates via the page element under it. */
+	/**
+	 * Maps a client point to page coordinates. Compares the point with the
+	 * rendered pages' rects (only a few are in the DOM) rather than hit testing,
+	 * which walks every annotation element on a dense page.
+	 */
 	locate(clientX: number, clientY: number): PagePoint | null {
-		const el = this.root.ownerDocument.elementsFromPoint(clientX, clientY).find((e) => this.root.contains(e) && (e as HTMLElement).closest(".pdf-ink-page"));
-		const page = (el as HTMLElement | undefined)?.closest(".pdf-ink-page") as HTMLElement | null;
-		if (!page) return null;
+		const viewport = this.root.querySelector(".pdf-ink-viewport")?.getBoundingClientRect();
+		if (!viewport || clientX < viewport.left || clientX > viewport.right || clientY < viewport.top || clientY > viewport.bottom) return null;
+		let page: HTMLElement | null = null, rect: DOMRect | null = null;
+		for (const el of Array.from(this.root.querySelectorAll<HTMLElement>(".pdf-ink-page"))) {
+			const r = el.getBoundingClientRect();
+			if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+				page = el;
+				rect = r;
+				break;
+			}
+		}
+		if (!page || !rect) return null;
 		const scale: number | undefined = this.tools.registry?.getPlugin("zoom")?.provides()?.forDocument(this.tools.documentId)?.getState()?.currentZoomLevel;
 		if (!scale) return null;
-		const rect = page.getBoundingClientRect();
 		return { pageIndex: Number(page.dataset.pageIndex), x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale, scale, rect };
 	}
 

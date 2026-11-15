@@ -3,6 +3,8 @@ import { createPdfiumEngine } from "@embedpdf/engines/pdfium-worker-engine";
 import { TFile } from "obsidian";
 import { PdfInkView } from "../src/view";
 import { DEFAULT_SETTINGS, normalizeSettings } from "../src/settings";
+import { memoStats } from "../src/memo-annotations";
+(window as any).memoStats = memoStats;
 
 declare global {
 	interface Window {
