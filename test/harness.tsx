@@ -5,6 +5,8 @@ import { PdfInkView } from "../src/view";
 import { DEFAULT_SETTINGS, normalizeSettings } from "../src/settings";
 import { memoStats } from "../src/memo-annotations";
 (window as any).memoStats = memoStats;
+(window as any).normalizeSettings = normalizeSettings;
+(window as any).DEFAULT_SETTINGS = DEFAULT_SETTINGS;
 
 declare global {
 	interface Window {

@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs production",
     "dev": "node scripts/build.mjs",
-    "test": "node scripts/build.mjs test && node test/out/units.cjs && node test/viewer.cjs",
+    "test": "node scripts/build.mjs test && node test/out/units.cjs && node test/viewer.cjs && node test/scenarios.cjs",
     "test:perf": "node scripts/build.mjs test && node test/perf.cjs"
   },
   "license": "MIT",

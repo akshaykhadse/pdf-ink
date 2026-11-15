@@ -238,7 +238,7 @@ export class PdfInkView extends FileView {
 					linkVars: (page, rect, text, color) => this.linkVars(file, page, rect, text, color),
 					deliverLink: (text) => deliverLink(this.app, this.plugin.settings, file, text),
 					backlinks: () => this.backlinks(file),
-					openBacklink: (link: Backlink) => void openBacklink(this.app, link, file.path),
+					openBacklink: (link: Backlink) => void openBacklink(this.app, link),
 					openSidecar: () => void openSidecar(this.app, this.plugin.settings, file, this.leaf).catch((e) => new Notice(`PDF Ink: ${e?.message ?? e}`)),
 					// The layout's first scroll events report the top of the document: not until the old spot is restored.
 					positionChanged: (pos) => !this.restoring && this.plugin.rememberPosition(file.path, pos),

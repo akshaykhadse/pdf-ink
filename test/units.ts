@@ -1,7 +1,7 @@
 // Pure-function checks, run with node after bundling (test/out/units.cjs).
 import { smoothStroke } from "../src/ink";
 import { fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "../src/links";
-import { DEFAULT_SETTINGS, defaultSettings, normalizeSettings, parseColors, parseNumbers } from "../src/settings";
+import { DEFAULT_SETTINGS, defaultSettings, ignoredParts, normalizeSettings, parseColors, parseLinkFormats, parseNumbers } from "../src/settings";
 import { annotationHit, tapHit } from "../src/guard";
 import { dotSize } from "../src/toolbar";
 import { fitTextBox, wrapLines } from "../src/text-box";
@@ -103,3 +103,13 @@ check("strokePattern scales dashes with width", JSON.stringify(strokePattern("da
 check("lineStyleOf reads dashes and dots back", lineStyleOf({ strokeStyle: 2, strokeDashArray: [6, 4], strokeWidth: 2 }) === "dashed" && lineStyleOf({ strokeStyle: 2, strokeDashArray: [2, 4], strokeWidth: 2 }) === "dotted" && lineStyleOf({ strokeStyle: 1 }) === "solid");
 check("normalizeSettings repairs text format and line settings", (() => { const n = normalizeSettings({ textFormat: { font: "comic", bold: 1 } as any, shapeLine: { style: "wavy", end: "circle" } as any }); return n.textFormat.font === "sans" && n.textFormat.bold === false && n.shapeLine.style === "solid" && n.shapeLine.end === "circle" && n.shapeLine.start === "none"; })());
 if (failed) process.exit(1);
+
+// settings parsing and the newer settings
+{
+	const pc = parseColors, ns = normalizeSettings;
+	const f = parseLinkFormats("Link: [[{{file}}#page={{page}}]]\nno colon here\nQuote: > {{text}}\\n> p.{{page}}");
+	check("parseLinkFormats reads Name: template lines and turns \\n into line breaks", f.length === 2 && f[1].name === "Quote" && f[1].template === "> {{text}}\n> p.{{page}}", JSON.stringify(f));
+	check("ignoredParts lists what a colour list drops", JSON.stringify(ignoredParts("#ff0000, red, #12", (p: string) => pc(p).length > 0)) === JSON.stringify(["red", "#12"]));
+	const n = ns({ hiddenTools: ["image", "hand", "bogus"], startTool: "nope", lastTool: "marker", darkPages: "sometimes", penButton: "off" } as any);
+	check("normalizeSettings keeps only hideable tools and repairs the new settings", JSON.stringify(n.hiddenTools) === '["image"]' && n.startTool === "hand" && n.lastTool === "marker" && n.darkPages === "off" && n.penButton === "off", JSON.stringify([n.hiddenTools, n.startTool, n.lastTool, n.darkPages, n.penButton]));
+}

@@ -1,6 +1,7 @@
 // Plugin settings: tool styles, stylus behaviour, link templates and the sidecar.
-import { App, Modal, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
 import type PdfInkPlugin from "./main";
+import type { ToolId } from "./tools";
 
 /** A drawing tool's current style. */
 export interface ToolStyle {
@@ -49,6 +50,12 @@ export interface LinkFormat {
 	name: string;
 	template: string;
 }
+
+/** Drawing tools that can be hidden from the toolbar (hand and pointer always show). */
+export const HIDEABLE_TOOLS: readonly ToolId[] = ["pen", "marker", "textHighlight", "text", "shape", "eraser", "areaLink", "image"];
+export const START_TOOLS: readonly (ToolId | "last")[] = ["hand", "pointer", "pen", "marker", "textHighlight", "text", "shape", "eraser", "last"];
+export type DarkPages = "off" | "theme" | "always";
+export type PenButton = "eraser" | "off";
 
 export interface Settings {
 	/** Colours offered on the toolbar for the pen. */
@@ -103,6 +110,16 @@ export interface Settings {
 	sidecarSuffix: string;
 	/** Full-screen mode also hides Obsidian's status bar and mobile navigation. */
 	fullscreenHidesChrome: boolean;
+	/** Drawing tools left off the toolbar. */
+	hiddenTools: ToolId[];
+	/** The tool a PDF opens with; "last" = the tool used last. */
+	startTool: ToolId | "last";
+	/** The tool used last (for startTool "last"). */
+	lastTool: ToolId;
+	/** Show pages inverted (dark): never, when Obsidian's theme is dark, or always. Not native to EmbedPDF. */
+	darkPages: DarkPages;
+	/** What a press of the pen's side button does while hovering. */
+	penButton: PenButton;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -144,6 +161,11 @@ export const DEFAULT_SETTINGS: Settings = {
 	sidecarFolder: "",
 	sidecarSuffix: "",
 	fullscreenHidesChrome: true,
+	hiddenTools: [],
+	startTool: "hand",
+	lastTool: "hand",
+	darkPages: "off",
+	penButton: "eraser",
 };
 
 /** A fresh copy of the defaults that shares no arrays or objects with DEFAULT_SETTINGS. */
@@ -163,6 +185,23 @@ export function parseNumbers(text: string, min: number, max: number): number[] {
 		if (part && Number.isFinite(n) && n >= min && n <= max && !out.includes(n)) out.push(n);
 	}
 	return out.sort((a, b) => a - b);
+}
+
+/** The parts of a list that `parse` would drop, for feedback in the settings tab. */
+export function ignoredParts(text: string, keep: (part: string) => boolean): string[] {
+	return text
+		.split(/[\s,]+/)
+		.map((p) => p.trim())
+		.filter((p) => p && !keep(p));
+}
+
+/** "Name: template" lines (\n in a template is a line break); lines without a colon are skipped. */
+export function parseLinkFormats(text: string): LinkFormat[] {
+	return text
+		.split("\n")
+		.map((line) => line.match(/^\s*([^:]+?)\s*:\s*(.+)$/))
+		.filter((m): m is RegExpMatchArray => !!m)
+		.map((m) => ({ name: m[1], template: m[2].replace(/\\n/g, "\n") }));
 }
 
 export function parseColors(text: string): string[] {
@@ -194,8 +233,15 @@ function formats(list: unknown, d: LinkFormat[]): LinkFormat[] {
 export function normalizeSettings(raw: Partial<Settings> | null | undefined): Settings {
 	const r: any = raw ?? {};
 	const d = DEFAULT_SETTINGS;
-	const list = (v: unknown, fallback: string[]) => (Array.isArray(v) ? parseColors(v.join(",")) : []).length ? parseColors((v as string[]).join(",")) : fallback;
-	const nums = (v: unknown, fallback: number[], lo = MIN_WIDTH, hi = MAX_WIDTH) => (Array.isArray(v) && parseNumbers(v.join(","), lo, hi).length ? parseNumbers(v.join(","), lo, hi) : fallback);
+	const list = (v: unknown, fallback: string[]) => {
+		const parsed = Array.isArray(v) ? parseColors(v.join(",")) : [];
+		return parsed.length ? parsed : fallback;
+	};
+	const nums = (v: unknown, fallback: number[], lo = MIN_WIDTH, hi = MAX_WIDTH) => {
+		const parsed = Array.isArray(v) ? parseNumbers(v.join(","), lo, hi) : [];
+		return parsed.length ? parsed : fallback;
+	};
+	const ALL_TOOLS: readonly string[] = ["hand", "pointer", ...HIDEABLE_TOOLS];
 	return {
 		penColors: list(r.penColors, d.penColors),
 		highlightColors: list(r.highlightColors, d.highlightColors),
@@ -237,6 +283,11 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
 		sidecarFolder: typeof r.sidecarFolder === "string" ? r.sidecarFolder.replace(/^\/+|\/+$/g, "") : d.sidecarFolder,
 		sidecarSuffix: typeof r.sidecarSuffix === "string" ? r.sidecarSuffix : d.sidecarSuffix,
 		fullscreenHidesChrome: typeof r.fullscreenHidesChrome === "boolean" ? r.fullscreenHidesChrome : d.fullscreenHidesChrome,
+		hiddenTools: Array.isArray(r.hiddenTools) ? HIDEABLE_TOOLS.filter((t) => r.hiddenTools.includes(t)) : [...d.hiddenTools],
+		startTool: START_TOOLS.includes(r.startTool) ? r.startTool : d.startTool,
+		lastTool: ALL_TOOLS.includes(r.lastTool) ? r.lastTool : d.lastTool,
+		darkPages: r.darkPages === "off" || r.darkPages === "theme" || r.darkPages === "always" ? r.darkPages : d.darkPages,
+		penButton: r.penButton === "eraser" || r.penButton === "off" ? r.penButton : d.penButton,
 	};
 }
 
@@ -260,38 +311,70 @@ export class PdfInkSettingTab extends PluginSettingTab {
 		);
 		new Setting(containerEl).setName("Autosave").setDesc("Write annotations into the PDF a moment after each change. Off: save with Ctrl/Cmd+S or when the PDF is closed.").addToggle((t) => t.setValue(s.autosave).onChange(async (v) => ((s.autosave = v), save())));
 
+		new Setting(containerEl).setName("Pages").setHeading();
+		new Setting(containerEl)
+			.setName("Dark pages")
+			.setDesc("Show pages inverted, light on dark, with annotations inverted to match (not native to EmbedPDF; the PDF itself is not changed).")
+			.addDropdown((d) => d.addOptions({ off: "Off", theme: "With a dark Obsidian theme", always: "Always" }).setValue(s.darkPages).onChange(async (v) => ((s.darkPages = v as DarkPages), save())));
+
+		new Setting(containerEl).setName("Toolbar").setHeading();
+		new Setting(containerEl)
+			.setName("Tool when a PDF opens")
+			.addDropdown((d) =>
+				d
+					.addOptions({ hand: "Hand", pointer: "Pointer", pen: "Pen", marker: "Highlighter", textHighlight: "Text highlighter", text: "Text", shape: "Shapes", eraser: "Eraser", last: "The tool used last" })
+					.setValue(s.startTool)
+					.onChange(async (v) => ((s.startTool = v as Settings["startTool"]), save()))
+			);
+		const TOOL_NAMES: Record<string, string> = { pen: "Pen", marker: "Highlighter", textHighlight: "Text highlighter", text: "Text", shape: "Shapes", eraser: "Eraser", areaLink: "Area link", image: "Image" };
+		for (const tool of HIDEABLE_TOOLS) {
+			new Setting(containerEl)
+				.setName(`Show ${TOOL_NAMES[tool]}`)
+				.setDesc(tool === "textHighlight" ? "Selecting text with the pointer also offers Highlight." : "")
+				.addToggle((t) =>
+					t.setValue(!s.hiddenTools.includes(tool)).onChange(async (v) => {
+						s.hiddenTools = v ? s.hiddenTools.filter((x) => x !== tool) : [...s.hiddenTools, tool];
+						await save();
+					})
+				);
+		}
+
 		new Setting(containerEl).setName("Stylus").setHeading();
-		new Setting(containerEl).setName("Stylus mode on by default").setDesc("Off: fingers draw too. On: fingers pan and scroll while only the pen draws. Can also be toggled on the toolbar.").addToggle((t) => t.setValue(s.stylusMode).onChange(async (v) => ((s.stylusMode = v), save())));
-		new Setting(containerEl).setName("Smooth strokes").setDesc("Resample each stroke along a curve through the pen's samples (not native to EmbedPDF, which draws straight segments).").addToggle((t) => t.setValue(s.smoothStrokes).onChange(async (v) => ((s.smoothStrokes = v), save())));
-		new Setting(containerEl).setName("Use the pen's full sample rate").setDesc("Feed the browser's coalesced pointer samples to the stroke (not native to EmbedPDF).").addToggle((t) => t.setValue(s.fullPenRate).onChange(async (v) => ((s.fullPenRate = v), save())));
-		new Setting(containerEl).setName("Log pen timing").setDesc("Diagnostic: write the timings of each pen stroke to pen-timing.log in the plugin folder (up to 400 strokes per opened PDF).").addToggle((t) => t.setValue(s.penTimingLog).onChange(async (v) => ((s.penTimingLog = v), save())));
+		new Setting(containerEl).setName("Stylus mode").setDesc("On: fingers pan and scroll while only the pen draws. Off: fingers draw too. The toolbar's stylus button switches it, and the choice is kept.").addToggle((t) => t.setValue(s.stylusMode).onChange(async (v) => ((s.stylusMode = v), save())));
+		new Setting(containerEl)
+			.setName("Pen side button")
+			.setDesc("What a press of the pen's button does while the pen hovers over the page.")
+			.addDropdown((d) => d.addOptions({ eraser: "Switch to the eraser and back", off: "Nothing" }).setValue(s.penButton).onChange(async (v) => ((s.penButton = v as PenButton), save())));
 		new Setting(containerEl).setName("Eraser size").setDesc("Diameter in pixels.").addSlider((sl) => sl.setLimits(6, 120, 2).setValue(s.eraserSize).setDynamicTooltip().onChange(async (v) => ((s.eraserSize = v), save())));
 
 		new Setting(containerEl).setName("Tools").setHeading();
-		const colors = (name: string, desc: string, get: () => string[], set: (v: string[]) => void) =>
-			new Setting(containerEl).setName(name).setDesc(desc).addTextArea((t) =>
-				t.setValue(get().join(", ")).onChange(async (v) => {
-					const parsed = parseColors(v);
+		/** A list typed as text: read when the field loses focus; ignored entries are reported. */
+		const listField = <T,>(setting: Setting, multiline: boolean, get: () => T[], parse: (text: string) => T[], keep: (part: string) => boolean, set: (v: T[]) => void, what: string) => {
+			const add = (c: { inputEl: HTMLInputElement | HTMLTextAreaElement; setValue(v: string): unknown }) => {
+				c.setValue(get().join(", "));
+				c.inputEl.addEventListener("blur", async () => {
+					const text = c.inputEl.value;
+					const parsed = parse(text);
+					const ignored = ignoredParts(text, keep);
+					if (ignored.length) new Notice(`PDF Ink ignored ${ignored.map((x) => `"${x}"`).join(", ")}: not ${what}.`, 6000);
 					if (parsed.length) {
 						set(parsed);
 						await save();
 					}
-				})
-			);
+					c.setValue(get().join(", "));
+				});
+			};
+			if (multiline) setting.addTextArea(add as any);
+			else setting.addText(add as any);
+		};
+		const colors = (name: string, desc: string, get: () => string[], set: (v: string[]) => void) =>
+			listField(new Setting(containerEl).setName(name).setDesc(desc), true, get, parseColors, (p) => parseColors(p).length > 0, set, "a #rrggbb colour");
 		colors("Pen colours", "Hex colours offered for the pen, separated by commas.", () => s.penColors, (v) => (s.penColors = v));
 		colors("Highlighter colours", "Hex colours offered for the freehand and text highlighters.", () => s.highlightColors, (v) => (s.highlightColors = v));
 		colors("Text colours", "Hex colours offered for the text tool.", () => s.textColors, (v) => (s.textColors = v));
 		colors("Shape colours", "Hex colours offered for arrows, lines, rectangles and ellipses.", () => s.shapeColors, (v) => (s.shapeColors = v));
 		const widths = (name: string, desc: string, get: () => number[], set: (v: number[]) => void, lo = MIN_WIDTH, hi = MAX_WIDTH) =>
-			new Setting(containerEl).setName(name).setDesc(desc).addText((t) =>
-				t.setValue(get().join(", ")).onChange(async (v) => {
-					const parsed = parseNumbers(v, lo, hi);
-					if (parsed.length) {
-						set(parsed);
-						await save();
-					}
-				})
-			);
+			listField(new Setting(containerEl).setName(name).setDesc(desc), false, get, (t) => parseNumbers(t, lo, hi), (p) => parseNumbers(p, lo, hi).length > 0, set, `a number from ${lo} to ${hi}`);
 		widths("Pen widths", `Stroke widths in PDF points offered for the pen (${MIN_WIDTH}–${MAX_WIDTH}).`, () => s.penWidths, (v) => (s.penWidths = v));
 		widths("Highlighter widths", "Stroke widths offered for the freehand highlighter.", () => s.markerWidths, (v) => (s.markerWidths = v));
 		widths("Shape line widths", `Line widths in PDF points offered for arrows, lines and shapes (${MIN_WIDTH}–${MAX_WIDTH}).`, () => s.shapeWidths, (v) => (s.shapeWidths = v));
@@ -304,16 +387,15 @@ export class PdfInkSettingTab extends PluginSettingTab {
 		const formatsSetting = (name: string, desc: string, get: () => LinkFormat[], set: (v: LinkFormat[]) => void) =>
 			new Setting(containerEl).setName(name).setDesc(desc).setClass("pdf-ink-setting-stacked").addTextArea((t) => {
 				t.inputEl.rows = 4;
-				t.setValue(get().map((f) => `${f.name}: ${f.template.replace(/\n/g, "\\n")}`).join("\n")).onChange(async (v) => {
-					const parsed = v
-						.split("\n")
-						.map((line) => line.match(/^\s*([^:]+?)\s*:\s*(.+)$/))
-						.filter((m): m is RegExpMatchArray => !!m)
-						.map((m) => ({ name: m[1], template: m[2].replace(/\\n/g, "\n") }));
+				const show = () => t.setValue(get().map((f) => `${f.name}: ${f.template.replace(/\n/g, "\\n")}`).join("\n"));
+				show();
+				t.inputEl.addEventListener("blur", async () => {
+					const parsed = parseLinkFormats(t.inputEl.value);
 					if (parsed.length) {
 						set(parsed);
 						await save();
-					}
+					} else new Notice("PDF Ink kept the link formats: write each as 'Name: template'.", 6000);
+					show();
 				});
 			});
 		formatsSetting(
@@ -324,20 +406,20 @@ export class PdfInkSettingTab extends PluginSettingTab {
 		);
 		formatsSetting("Area link formats", "Formats offered after selecting an area with the area link tool.", () => s.areaLinkFormats, (v) => (s.areaLinkFormats = v));
 		new Setting(containerEl).setName("Show backlinks on pages").setDesc("Draw a box where a note links to a page area or text of this PDF; click it to open the note.").addToggle((t) => t.setValue(s.showBacklinks).onChange(async (v) => ((s.showBacklinks = v), save())));
-		new Setting(containerEl).setName("Backlink colour").addText((t) =>
-			t.setValue(s.backlinkColor).onChange(async (v) => {
-				const c = parseColors(v)[0];
-				if (c) {
-					s.backlinkColor = c;
-					await save();
-				}
-			})
-		);
+		new Setting(containerEl)
+			.setName("Backlink colour")
+			.setDesc("Outline colour of the backlink boxes.")
+			.addColorPicker((c) => c.setValue(s.backlinkColor).onChange(async (v) => ((s.backlinkColor = parseColors(v)[0] ?? s.backlinkColor), save())));
 		new Setting(containerEl).setName("Sidecar note folder").setDesc("Folder for sidecar notes. Empty: next to the PDF.").addText((t) => t.setValue(s.sidecarFolder).onChange(async (v) => ((s.sidecarFolder = v.replace(/^\/+|\/+$/g, "")), save())));
 		new Setting(containerEl).setName("Sidecar note suffix").setDesc("Added to the PDF's name, e.g. ' notes' makes 'paper notes.md' for 'paper.pdf'.").addText((t) => t.setValue(s.sidecarSuffix).onChange(async (v) => ((s.sidecarSuffix = v), save())));
 
 		new Setting(containerEl).setName("Full screen").setHeading();
 		new Setting(containerEl).setName("Hide Obsidian's bars in full screen").setDesc("Also hide the status bar, ribbon and mobile navigation while a PDF is full screen.").addToggle((t) => t.setValue(s.fullscreenHidesChrome).onChange(async (v) => ((s.fullscreenHidesChrome = v), save())));
+
+		new Setting(containerEl).setName("Advanced").setHeading();
+		new Setting(containerEl).setName("Smooth strokes").setDesc("Resample each stroke along a curve through the pen's samples (not native to EmbedPDF, which draws straight segments).").addToggle((t) => t.setValue(s.smoothStrokes).onChange(async (v) => ((s.smoothStrokes = v), save())));
+		new Setting(containerEl).setName("Use the pen's full sample rate").setDesc("Feed the browser's coalesced pointer samples to the stroke (not native to EmbedPDF).").addToggle((t) => t.setValue(s.fullPenRate).onChange(async (v) => ((s.fullPenRate = v), save())));
+		new Setting(containerEl).setName("Log pen timing").setDesc("Diagnostic: write the timings of each pen stroke to pen-timing.log in the plugin folder (up to 400 strokes per opened PDF).").addToggle((t) => t.setValue(s.penTimingLog).onChange(async (v) => ((s.penTimingLog = v), save())));
 
 		new Setting(containerEl).setName("Reset").setHeading();
 		new Setting(containerEl)

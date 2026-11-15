@@ -204,12 +204,11 @@ export async function deliverLink(app: App, settings: Settings, pdf: TFile, text
 }
 
 /** Opens the note a backlink came from, at its line. */
-export async function openBacklink(app: App, link: Backlink, pdfPath: string): Promise<void> {
+export async function openBacklink(app: App, link: Backlink): Promise<void> {
 	const file = app.vault.getAbstractFileByPath(link.sourcePath);
 	if (!(file instanceof TFile)) return;
 	const open = app.workspace.getLeavesOfType("markdown").find((l) => (l.view as MarkdownView).file?.path === file.path);
 	const leaf = open ?? app.workspace.getLeaf("tab");
 	await leaf.openFile(file, { eState: { line: link.line } });
 	app.workspace.revealLeaf(leaf);
-	void pdfPath;
 }

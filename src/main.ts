@@ -108,11 +108,12 @@ export default class PdfInkPlugin extends Plugin {
 		// Save what the open views hold before the engine goes away.
 		// Views are flushed but not detached: Obsidian keeps the leaves and restores them when the plugin reloads.
 		const views = this.app.workspace.getLeavesOfType(VIEW_TYPE);
-		const timeout = new Promise<void>((r) => setTimeout(r, 4000));
-		await Promise.race([Promise.all(views.map((leaf) => (leaf.view as PdfInkView).flush().catch(() => {}))), timeout]);
+		const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+		// A big PDF can take a while to export: give the saves their own time before the engine goes.
+		await Promise.race([Promise.all(views.map((leaf) => (leaf.view as PdfInkView).flush().catch(() => {}))), wait(10000)]);
 		const enginePromise = this.engine;
 		this.engine = null;
-		const engine = await Promise.race([enginePromise?.catch(() => null), timeout]);
+		const engine = await Promise.race([enginePromise?.catch(() => null), wait(4000)]);
 		try {
 			engine?.destroy?.();
 		} catch (e) {

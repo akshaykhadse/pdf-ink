@@ -30,7 +30,7 @@ import { installInkSmoothing } from "./ink";
 import { PdfInkRenderers } from "./ink-preview";
 import { installAnnotationMemo } from "./memo-annotations";
 import { forgetStampSource, rememberStampSource } from "./stamp";
-import { FREETEXT, LINE, SQUARE, CIRCLE, SHAPE_TOOL, ToolController, toolOfAnnotation } from "./tools";
+import { FREETEXT, HIGHLIGHT, INK, LINE, SQUARE, CIRCLE, SHAPE_TOOL, ToolController, toolOfAnnotation } from "./tools";
 import { fontFormat, lineStyleOf } from "./formats";
 import { LineStyleGlyph, dotSize } from "./toolbar";
 import { LINE_STYLES } from "./settings";
@@ -395,7 +395,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 				const s = host.settings().textHighlight;
 				const ann = tools.annotations();
 				ann?.createAnnotation(pageIndex, {
-					type: 9,
+					type: HIGHLIGHT,
 					id: uuidV4(),
 					pageIndex,
 					rect: { origin: { x: rect.x, y: rect.y }, size: { width: rect.width, height: rect.height } },
@@ -427,8 +427,8 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 
 	/** Each kind of annotation takes its tool's palette (pen, highlighters, text, shapes); a mixed selection gets them all. */
 	const paletteFor = (objects: any[]): string[] => {
-		const pen = objects.some((o) => o?.type === 15 && o.intent !== "InkHighlight");
-		const hl = objects.some((o) => o?.type === 9 || (o?.type === 15 && o.intent === "InkHighlight"));
+		const pen = objects.some((o) => o?.type === INK && o.intent !== "InkHighlight");
+		const hl = objects.some((o) => o?.type === HIGHLIGHT || (o?.type === INK && o.intent === "InkHighlight"));
 		const text = objects.some((o) => o?.type === FREETEXT && o.intent !== "FreeTextCallout");
 		const shape = objects.some((o) => o?.type === LINE || o?.type === SQUARE || o?.type === CIRCLE);
 		return [...new Set([...(pen ? settings.penColors : []), ...(hl ? settings.highlightColors : []), ...(text ? settings.textColors : []), ...(shape ? settings.shapeColors : [])])];
@@ -507,7 +507,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 	return (
 		<AnnotationRendererProvider>
 		<PdfInkRenderers />
-		<div class="pdf-ink" ref={rootRef}>
+		<div class={"pdf-ink" + (settings.darkPages === "always" ? " is-dark-pages" : settings.darkPages === "theme" ? " is-dark-theme-pages" : "")} ref={rootRef}>
 			<Toolbar tools={tools} settings={settings} onOpenSidecar={host.openSidecar} />
 			<GlobalPointerProvider documentId={documentId} class="pdf-ink-global">
 			<Viewport documentId={documentId} class="pdf-ink-viewport">
@@ -525,7 +525,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 										<RenderLayer documentId={documentId} pageIndex={pageIndex} scale={1} class="pdf-ink-base" />
 										<TilingLayer documentId={documentId} pageIndex={pageIndex} class="pdf-ink-tiles" />
 										{settings.showBacklinks && links.length > 0 && (
-											<div class={"pdf-ink-backlinks" + (tools.tool === "pointer" ? " is-clickable" : "")}>
+											<div class="pdf-ink-backlinks">
 												{links.map((b, i) => {
 													const r = rectFromParam(b.rect!, pageHeight);
 													if (!r) return null;
@@ -604,10 +604,29 @@ function StyleControls({ o, tools, settings }: { o: any; tools: ToolController; 
 					))}
 					<span class="pdf-ink-opacity">
 						<Icon name="blend|droplet" />
-						<input type="range" min={5} max={100} step={5} value={Math.round((o.opacity ?? 1) * 100)} aria-label="Opacity" onChange={(e) => tools.restyle(o, { opacity: Number((e.target as HTMLInputElement).value) / 100 })} />
+						<OpacitySlider value={o.opacity ?? 1} onCommit={(v) => tools.restyle(o, { opacity: v })} />
 					</span>
 				</div>
 			)}
 		</>
 	);
+}
+
+/**
+ * An opacity slider that changes the annotation once, when it is let go (one
+ * undo step), not on every tick. A native change listener: EmbedPDF loads
+ * preact/compat, which turns onChange into onInput.
+ */
+function OpacitySlider({ value, onCommit }: { value: number; onCommit(v: number): void }) {
+	const ref = useRef<HTMLInputElement>(null);
+	const commit = useRef(onCommit);
+	commit.current = onCommit;
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		const changed = () => commit.current(Number(el.value) / 100);
+		el.addEventListener("change", changed);
+		return () => el.removeEventListener("change", changed);
+	}, []);
+	return <input ref={ref} type="range" min={5} max={100} step={5} defaultValue={String(Math.round(value * 100))} aria-label="Opacity" />;
 }

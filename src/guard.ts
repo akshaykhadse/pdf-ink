@@ -25,7 +25,7 @@
  *    same way: a drag selects the text inside, a tap opens the note.
  */
 import type { Settings } from "./settings";
-import type { ToolController } from "./tools";
+import { CIRCLE, FREETEXT, HIGHLIGHT, INK, LINE, POLYGON, POLYLINE, SQUARE, type ToolController } from "./tools";
 
 interface PagePoint {
 	pageIndex: number;
@@ -38,7 +38,6 @@ interface PagePoint {
 	rect?: DOMRect;
 }
 
-const FREETEXT = 3, LINE = 4, SQUARE = 5, CIRCLE = 6, HIGHLIGHT = 9, INK = 15;
 /** A touch this close to the pen's contact point (CSS px) is the pen itself. */
 const PEN_TOUCH_RADIUS = 48;
 /** Pen buttons that mean "erase": primary while hovering (S Pen), barrel (2) or eraser end (32). */
@@ -108,7 +107,6 @@ export function annotationHit(a: any, x: number, y: number, radius: number): boo
 	return false;
 }
 
-const POLYGON = 7, POLYLINE = 8;
 
 const filled = (a: any) => !!a.color && a.color !== "transparent";
 
@@ -447,7 +445,7 @@ export class PointerGuard {
 		if (e.pointerType === "pen" && !down) {
 			// Side button while hovering: buttons pressed, no pointerdown, no pressure. Each press toggles the eraser.
 			const pressed = (e.buttons & ERASER_BUTTONS) !== 0 && e.pressure === 0;
-			if (pressed && !this.buttonHeld) this.tools.toggleEraser();
+			if (pressed && !this.buttonHeld && this.settings().penButton === "eraser") this.tools.toggleEraser();
 			this.buttonHeld = pressed;
 		}
 		if (down) {
