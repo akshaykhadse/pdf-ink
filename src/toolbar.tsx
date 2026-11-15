@@ -106,7 +106,9 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 			setPopover(null);
 		}
 	};
-	const activeDraw = DRAW_TOOLS.find((t) => t.id === state.tool) ?? DRAW_TOOLS[0];
+	// Tools hidden in the settings stay off the bar (the active one still shows).
+	const drawTools = DRAW_TOOLS.filter((t) => t.id === state.tool || !settings.hiddenTools.includes(t.id));
+	const activeDraw = drawTools.find((t) => t.id === state.tool) ?? drawTools[0];
 	const styled = STYLED_TOOLS.has(state.tool);
 
 	const toolButton = (t: ToolDef) => (
@@ -174,9 +176,9 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 		<div class="pdf-ink-toolbar-host" ref={hostRef} data-level={level}>
 			<div class="pdf-ink-toolbar" ref={pillRef} role="toolbar" aria-label="PDF Ink">
 				<div class="pdf-ink-group">{NAV_TOOLS.map(toolButton)}</div>
-				<div class="pdf-ink-group">
+				{drawTools.length > 0 && (<div class="pdf-ink-group">
 					{level < 4 ? (
-						DRAW_TOOLS.map(toolButton)
+						drawTools.map(toolButton)
 					) : (
 						<>
 							{toolButton(activeDraw)}
@@ -185,7 +187,7 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 							</button>
 						</>
 					)}
-				</div>
+				</div>)}
 				{styled && (
 					<div class="pdf-ink-group">
 						<button class={"pdf-ink-btn pdf-ink-style" + (popover === "options" ? " is-open" : "")} aria-label="Tool options" onClick={() => setPopover(popover === "options" ? null : "options")}>
@@ -221,7 +223,7 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 			)}
 			{popover === "tools" && (
 				<Pop>
-					<div class="pdf-ink-group">{DRAW_TOOLS.map(toolButton)}</div>
+					<div class="pdf-ink-group">{drawTools.map(toolButton)}</div>
 				</Pop>
 			)}
 			{popover === "more" && (

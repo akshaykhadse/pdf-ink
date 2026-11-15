@@ -24,6 +24,8 @@ let installed = false;
 let enabled = true;
 /** Set while a wrapper creates the real container's element, so it is not wrapped again. */
 let bypass = false;
+/** How many annotation containers were wrapped and how many renders were skipped (checked by the tests). */
+export const memoStats = { wrapped: 0, skipped: 0 };
 
 function isContainer(type: unknown, props: any): boolean {
 	return typeof type === "function" && props != null && props.trackedAnnotation !== undefined && typeof props.onSelect === "function" && "isMultiSelected" in props && typeof props.children === "function";
@@ -41,6 +43,7 @@ function wrap(inner: ComponentType<any>): ComponentType<any> {
 				if (next[k] !== prev[k]) return true;
 			}
 			for (const k in prev) if (!(k in next)) return true;
+			memoStats.skipped++;
 			return false;
 		}
 		render(props: any) {
@@ -69,6 +72,7 @@ export function installAnnotationMemo(on = true): void {
 			const w = wrap(t) as any;
 			w.__pdfInkMemo = true;
 			(vnode as any).type = w;
+			memoStats.wrapped++;
 		}
 		if (prev) prev(vnode);
 	};

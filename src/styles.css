@@ -631,3 +631,19 @@ body.pdf-ink-fullscreen-hide-chrome .workspace-ribbon {
 .pdf-ink button.pdf-ink-menu-item.is-active {
 	box-shadow: inset 0 -2px 0 var(--interactive-accent) !important;
 }
+
+/*
+ * Dark pages (not native to EmbedPDF): each page, with its annotations, is drawn
+ * inverted; hue-rotate keeps colours recognisable. Menus on a page are inverted
+ * back. One filter per page, so it costs one compositing layer per page.
+ */
+.pdf-ink.is-dark-pages .pdf-ink-page,
+.theme-dark .pdf-ink.is-dark-theme-pages .pdf-ink-page {
+	filter: invert(1) hue-rotate(180deg);
+}
+.pdf-ink.is-dark-pages .pdf-ink-page .pdf-ink-float,
+.pdf-ink.is-dark-pages .pdf-ink-page .pdf-ink-area-menu,
+.theme-dark .pdf-ink.is-dark-theme-pages .pdf-ink-page .pdf-ink-float,
+.theme-dark .pdf-ink.is-dark-theme-pages .pdf-ink-page .pdf-ink-area-menu {
+	filter: invert(1) hue-rotate(180deg);
+}

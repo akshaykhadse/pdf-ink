@@ -14,7 +14,7 @@
  *   shape         EmbedPDF's `lineArrow`, `line`, `square` or `circle` tool (native), by `settings.shapeKind`.
  */
 import type { Settings, ShapeKind, ShapeLine, TextFormat, ToolStyle } from "./settings";
-import { ALIGN_VALUE, LINE_END_VALUE, standardFont, strokePattern } from "./formats";
+import { ALIGN_VALUE, LINE_END_VALUE, lineStyleOf, standardFont, strokePattern } from "./formats";
 
 export type ToolId = "hand" | "pointer" | "pen" | "marker" | "textHighlight" | "text" | "shape" | "eraser" | "areaLink" | "image";
 
@@ -26,6 +26,7 @@ export const ERASER_MODE = "pdfInkEraser";
 
 /** PDF annotation subtypes (PdfAnnotationSubtype). */
 export const FREETEXT = 3, LINE = 4, SQUARE = 5, CIRCLE = 6, HIGHLIGHT = 9, INK = 15;
+export const POLYGON = 7, POLYLINE = 8;
 
 /** EmbedPDF tool id for each shape kind. */
 export const SHAPE_TOOL: Record<ShapeKind, string> = { arrow: "lineArrow", line: "line", rectangle: "square", ellipse: "circle" };
@@ -92,7 +93,8 @@ export class ToolController {
 		const syncHistory = () => this.set(() => ((this.canUndo = !!history?.canUndo?.()), (this.canRedo = !!history?.canRedo?.())));
 		this.off.push(history?.onHistoryChange?.(syncHistory) ?? (() => {}));
 		syncHistory();
-		this.setTool("hand");
+		const s = host.settings();
+		this.setTool(s.startTool === "last" ? s.lastTool : s.startTool);
 	}
 
 	destroy() {
@@ -167,6 +169,7 @@ export class ToolController {
 		const focused = (globalThis as any).activeDocument?.activeElement ?? globalThis.document?.activeElement;
 		if (focused?.isContentEditable) focused.blur();
 		this._tool = tool;
+		this.rememberTool(tool);
 		this.applying = true;
 		try {
 			ann?.deselectAnnotation?.();
@@ -188,6 +191,14 @@ export class ToolController {
 			this.applying = false;
 		}
 		this.notify();
+	}
+
+	/** For "open with the tool used last"; written only when that setting is chosen. */
+	private rememberTool(tool: ToolId) {
+		const s = this.host.settings();
+		if (s.lastTool === tool) return;
+		s.lastTool = tool;
+		if (s.startTool === "last") this.host.saveSettings();
 	}
 
 	private modeChanged(mode: string) {
@@ -252,13 +263,17 @@ export class ToolController {
 		Object.assign(style, patch);
 		this.pushStyle(tool);
 		this.host.saveSettings();
-		// Restyle what is selected too, so a swatch tap recolours a selected stroke.
-		const ann = this.annotations();
-		for (const a of ann?.getSelectedAnnotations?.() ?? []) {
-			const o = a.object;
-			if (toolOfAnnotation(o) === tool) ann.updateAnnotation(o.pageIndex, o.id, this.annotationPatch(tool, patch));
-		}
 		this.notify();
+	}
+
+	/** Changes the width (font size for text) or opacity of one existing annotation: one undo step. */
+	restyle(o: any, patch: Partial<ToolStyle>) {
+		const tool = toolOfAnnotation(o);
+		if (!tool) return;
+		const p = this.annotationPatch(tool, patch);
+		// A shape keeps its own line style when its width changes.
+		if (tool === "shape" && patch.width !== undefined) Object.assign(p, strokePattern(lineStyleOf(o), patch.width));
+		this.annotations()?.updateAnnotation(o.pageIndex, o.id, p);
 	}
 
 	private annotationPatch(tool: ToolId, style: Partial<ToolStyle>): Record<string, unknown> {
@@ -314,8 +329,6 @@ export class ToolController {
 		Object.assign(s.textFormat, patch);
 		this.pushStyle("text");
 		this.host.saveSettings();
-		const ann = this.annotations();
-		for (const a of ann?.getSelectedAnnotations?.() ?? []) if (toolOfAnnotation(a.object) === "text") ann.updateAnnotation(a.object.pageIndex, a.object.id, this.textFormatPatch(s.textFormat));
 		this.notify();
 	}
 
@@ -338,7 +351,11 @@ export class ToolController {
 		this.annotations()?.updateAnnotation(o.pageIndex, o.id, strokePattern(style, o.strokeWidth ?? 1));
 	}
 
+	/** Bumped when the settings change from the settings tab (the viewer re-renders for those only). */
+	settingsVersion = 0;
+
 	pushAllStyles() {
+		this.settingsVersion++;
 		for (const t of ["pen", "marker", "textHighlight", "text", "shape"] as ToolId[]) this.pushStyle(t);
 	}
 
@@ -363,8 +380,11 @@ export class ToolController {
 		this.plugin("zoom")?.forDocument(this.documentId)?.requestZoom?.("fit-page");
 	}
 	goToPage(pageNumber: number) {
-		const n = Math.max(1, Math.min(this.pages || 1, Math.round(pageNumber)));
-		this.plugin("scroll")?.forDocument(this.documentId)?.scrollToPage?.({ pageNumber: n, behavior: "smooth" });
+		const scroll = this.plugin("scroll")?.forDocument(this.documentId);
+		// The page count from EmbedPDF itself: the cached one is only updated by page changes.
+		const pages = scroll?.getTotalPages?.() || this.pages || 1;
+		const n = Math.max(1, Math.min(pages, Math.round(pageNumber)));
+		scroll?.scrollToPage?.({ pageNumber: n, behavior: "smooth" });
 	}
 	deleteSelected() {
 		const ann = this.annotations();
