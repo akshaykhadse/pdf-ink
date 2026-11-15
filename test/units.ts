@@ -49,6 +49,20 @@ check("smoothStroke drops duplicate samples", smoothStroke([{ x: 0, y: 0 }, { x:
 // eraser hit test
 const ink = { type: 15, strokeWidth: 2, inkList: [{ points: [{ x: 0, y: 0 }, { x: 10, y: 0 }] }] };
 check("annotationHit finds an ink segment within the radius", annotationHit(ink, 5, 2, 1.5) && !annotationHit(ink, 5, 5, 1.5));
+{
+	// A page of 460 strokes of 80 points (a busy page of a real notebook): the rect check skips the far ones.
+	const strokes = Array.from({ length: 460 }, (_, i) => {
+		const x0 = (i % 20) * 28, y0 = Math.floor(i / 20) * 36;
+		const points = Array.from({ length: 80 }, (_, k) => ({ x: x0 + k * 0.3, y: y0 + Math.sin(k / 5) * 4 }));
+		return { type: 15, strokeWidth: 2, inkList: [{ points }], rect: { origin: { x: x0 - 1, y: y0 - 5 }, size: { width: 25, height: 10 } } };
+	});
+	const withRect = { ...ink, rect: { origin: { x: -1, y: -1 }, size: { width: 12, height: 2 } } };
+	const t0 = performance.now();
+	let hits = 0;
+	for (let n = 0; n < 20; n++) for (const s of strokes) if (annotationHit(s, 300, 200, 4)) hits++;
+	const ms = (performance.now() - t0) / 20;
+	check("annotationHit rejects strokes by their rect first (busy page under 1 ms per sample)", ms < 1 && annotationHit(withRect, 5, 2, 1.5) && !annotationHit(withRect, 5, 9, 1.5), ms.toFixed(3) + " ms, " + hits / 20 + " hits");
+}
 const hl = { type: 9, segmentRects: [{ origin: { x: 0, y: 0 }, size: { width: 10, height: 4 } }] };
 check("annotationHit finds a highlight box", annotationHit(hl, 11, 2, 2) && !annotationHit(hl, 15, 2, 2));
 const sbox = { origin: { x: 10, y: 10 }, size: { width: 100, height: 50 } };

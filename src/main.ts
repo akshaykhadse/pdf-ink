@@ -97,6 +97,11 @@ export default class PdfInkPlugin extends Plugin {
 		this.wasmUrl = null;
 		this.restorePdfExtension();
 		document.body.removeClass("pdf-ink-fullscreen-active", "pdf-ink-fullscreen-hide-chrome");
+		if (this.soonTimer) {
+			clearTimeout(this.soonTimer);
+			this.soonTimer = null;
+			await this.saveData({ ...this.settings, positions: prunePositions(this.positions) });
+		}
 	}
 
 	/**
@@ -168,6 +173,20 @@ export default class PdfInkPlugin extends Plugin {
 			this.positionsTimer = null;
 			void this.saveSettings(false);
 		}, 2000);
+	}
+
+	private soonTimer: ReturnType<typeof setTimeout> | null = null;
+	/**
+	 * Saves a change made on a toolbar (a colour, a width, the opacity slider)
+	 * once the user pauses, instead of on every tap or slider tick. The toolbar
+	 * has already pushed the change into its own viewer.
+	 */
+	saveSettingsSoon() {
+		if (this.soonTimer) clearTimeout(this.soonTimer);
+		this.soonTimer = setTimeout(() => {
+			this.soonTimer = null;
+			void this.saveSettings();
+		}, 500);
 	}
 
 	/** Persists the settings and the reading positions; `fromTab` pushes the settings into the open viewers too. */

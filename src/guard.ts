@@ -34,6 +34,8 @@ interface PagePoint {
 	y: number;
 	/** Rendered pixels per PDF point. */
 	scale: number;
+	/** The page's client rect when it was located. */
+	rect?: DOMRect;
 }
 
 const FREETEXT = 3, LINE = 4, SQUARE = 5, CIRCLE = 6, HIGHLIGHT = 9, INK = 15;
@@ -43,6 +45,10 @@ const PEN_TOUCH_RADIUS = 48;
 const ERASER_BUTTONS = 1 | 2 | 32;
 /** How far (CSS px) a press may move and still count as a tap, by pointer type. */
 const TAP_SLOP: Record<string, number> = { mouse: 5, pen: 8, touch: 10 };
+
+function nearRect(o: { x: number; y: number }, sz: { width: number; height: number }, x: number, y: number, pad: number): boolean {
+	return x >= o.x - pad && x <= o.x + sz.width + pad && y >= o.y - pad && y <= o.y + sz.height + pad;
+}
 
 function segmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
 	const dx = bx - ax, dy = by - ay;
@@ -54,6 +60,8 @@ function segmentDistance(px: number, py: number, ax: number, ay: number, bx: num
 /** Whether an ink stroke, highlight, text box, line or shape is within `radius` page units of the point. */
 export function annotationHit(a: any, x: number, y: number, radius: number): boolean {
 	const box = a?.rect, o = box?.origin, sz = box?.size;
+	// Cheap reject first: nothing of an annotation lies outside its rect (padded for the stroke).
+	if (o && sz && !nearRect(o, sz, x, y, radius + (a.strokeWidth ?? 1))) return false;
 	if (a?.type === FREETEXT) {
 		// A text box goes when the eraser touches it anywhere.
 		return !!o && !!sz && x >= o.x - radius && x <= o.x + sz.width + radius && y >= o.y - radius && y <= o.y + sz.height + radius;
@@ -250,7 +258,7 @@ export class PointerGuard {
 		const scale: number | undefined = this.tools.registry?.getPlugin("zoom")?.provides()?.forDocument(this.tools.documentId)?.getState()?.currentZoomLevel;
 		if (!scale) return null;
 		const rect = page.getBoundingClientRect();
-		return { pageIndex: Number(page.dataset.pageIndex), x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale, scale };
+		return { pageIndex: Number(page.dataset.pageIndex), x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale, scale, rect };
 	}
 
 	private blockPenTouch(e: TouchEvent) {
@@ -358,7 +366,7 @@ export class PointerGuard {
 		this.erasing = { id: e.pointerId, last: null };
 		this.erased = [];
 		this.showCursor(e);
-		this.eraseAt(e.clientX, e.clientY);
+		this.eraseAt([e]);
 	}
 
 	private replayCoalesced(e: PointerEvent) {
@@ -439,7 +447,7 @@ export class PointerGuard {
 			e.preventDefault();
 			this.showCursor(e);
 			const events = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
-			for (const c of events.length ? events : [e]) this.eraseAt(c.clientX, c.clientY);
+			this.eraseAt(events.length ? events : [e]);
 			return;
 		}
 		if (!this.eraserActive()) return;
@@ -561,21 +569,34 @@ export class PointerGuard {
 		this.cursor.hidden = false;
 	}
 
-	private eraseAt(clientX: number, clientY: number) {
-		const p = this.locate(clientX, clientY);
+	/**
+	 * Erases along the samples of one pointer event. The page is found once per
+	 * event (its samples are a few pixels apart), and each annotation on the
+	 * page is tested against all the samples in one pass.
+	 */
+	private eraseAt(points: { clientX: number; clientY: number }[]) {
+		const last = points[points.length - 1];
+		const p = this.locate(last.clientX, last.clientY);
 		const annotations = this.tools.annotations();
-		if (!p || !annotations) {
+		if (!p || !p.rect || !annotations) {
 			if (this.erasing) this.erasing.last = null;
 			return;
 		}
 		const radius = this.settings().eraserSize / 2 / p.scale;
-		const last = this.erasing?.last;
-		const samples: PagePoint[] = [p];
-		if (last && last.pageIndex === p.pageIndex) {
-			const steps = Math.ceil(Math.hypot(p.x - last.x, p.y - last.y) / radius);
-			for (let i = 1; i < steps; i++) samples.push({ ...p, x: last.x + ((p.x - last.x) * i) / steps, y: last.y + ((p.y - last.y) * i) / steps });
+		const samples: { x: number; y: number }[] = [];
+		const before = this.erasing?.last;
+		let prev = before && before.pageIndex === p.pageIndex ? before : null;
+		for (const c of points) {
+			const q: PagePoint = { ...p, x: (c.clientX - p.rect.left) / p.scale, y: (c.clientY - p.rect.top) / p.scale };
+			// Fill the gap since the previous sample, so a fast stroke misses nothing.
+			if (prev) {
+				const steps = Math.ceil(Math.hypot(q.x - prev.x, q.y - prev.y) / radius);
+				for (let i = 1; i < steps; i++) samples.push({ x: prev.x + ((q.x - prev.x) * i) / steps, y: prev.y + ((q.y - prev.y) * i) / steps });
+			}
+			samples.push(q);
+			prev = q;
 		}
-		if (this.erasing) this.erasing.last = p;
+		if (this.erasing) this.erasing.last = prev;
 		const hits: { pageIndex: number; id: string }[] = [];
 		for (const tracked of annotations.getAnnotations?.({ pageIndex: p.pageIndex }) ?? []) {
 			const a = tracked?.object;

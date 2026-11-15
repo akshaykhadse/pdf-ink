@@ -213,7 +213,7 @@ export class PdfInkView extends FileView {
 				name: file.name,
 				host: {
 					settings: () => this.plugin.settings,
-					saveSettings: () => void this.plugin.saveSettings(),
+					saveSettings: () => this.plugin.saveSettingsSoon(),
 					onChange: () => this.markDirty(),
 					setFullscreen: (on) => this.setFullscreen(on),
 					isFullscreen: () => this.fullscreen,
