@@ -16,6 +16,8 @@ export class PdfInkView extends FileView {
 	/** Bumped per open, so a load that finishes after the file changed is dropped. */
 	private openToken = 0;
 	dirty = false;
+	/** Bumped on every change, so a save can tell whether something changed while it ran. */
+	private changes = 0;
 	private saving: Promise<boolean> | null = null;
 	private ignoreModifyUntil = 0;
 	private readonly requestAutosave: () => void;
@@ -274,6 +276,7 @@ export class PdfInkView extends FileView {
 
 	private markDirty() {
 		this.dirty = true;
+		this.changes++;
 		if (this.plugin.settings.autosave) this.requestAutosave();
 	}
 
@@ -288,13 +291,15 @@ export class PdfInkView extends FileView {
 			return true;
 		}
 		const saving = (this.saving = (async () => {
+			// A change made while the PDF is exported may be missing from these bytes: it stays dirty.
+			const changesBefore = this.changes;
 			try {
 				const bytes = await handle.save();
 				if (handle !== this.handle || file !== this.file) {
 					console.warn("[pdf-ink] file changed while saving; nothing written");
 					return false;
 				}
-				this.dirty = false;
+				if (this.changes === changesBefore) this.dirty = false;
 				this.ignoreModifyUntil = Date.now() + 2000;
 				await this.app.vault.modifyBinary(file, bytes);
 				this.ignoreModifyUntil = Date.now() + 1000;
@@ -313,7 +318,9 @@ export class PdfInkView extends FileView {
 		} finally {
 			if (this.saving === saving) this.saving = null;
 		}
-		if (!ok && !closing && this.dirty && this.plugin.settings.autosave) this.requestAutosave();
+		if (!closing && this.dirty && this.plugin.settings.autosave) this.requestAutosave();
+		// Closing: write what changed during this save as well.
+		else if (closing && ok && this.dirty) return this.saveNow(false, true);
 		return ok;
 	}
 }

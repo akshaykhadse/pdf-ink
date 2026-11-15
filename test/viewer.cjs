@@ -670,6 +670,31 @@ const files = {
 	const closedSave = await page.evaluate(() => window.saved.length);
 	check("closing right after a stroke saves it", closedSave === 1, closedSave);
 
+	// A stroke drawn while a save is exporting the PDF must still be written (it is not in those bytes).
+	await page.evaluate(() => window.view.onLoadFile(window.file));
+	await ready();
+	await tool("pen");
+	{
+		const r = await pageRect(0);
+		await page.evaluate(() => {
+			const h = window.view.handle, orig = h.save;
+			h.save = async () => { const b = await orig(); await new Promise((res) => setTimeout(res, 600)); return b; };
+		});
+		await stroke(r.x + 100, r.y + 300);
+		const before = await count();
+		const saving = page.evaluate(() => window.view.saveNow(false));
+		await page.waitForTimeout(50);
+		await stroke(r.x + 100, r.y + 420);
+		await saving;
+		const dirtyAfter = await page.evaluate(() => window.view.dirty);
+		await page.evaluate(() => window.view.flush());
+		await page.evaluate(() => window.view.onLoadFile(window.file));
+		await ready();
+		await page.waitForTimeout(500);
+		const after = await count();
+		check("a stroke drawn while a save runs stays unsaved, then is written", dirtyAfter === true && after === before + 1, JSON.stringify({ dirtyAfter, before, after }));
+	}
+
 	// --- long document
 	await page.evaluate(() => window.run("/long.pdf"));
 	check("a 30-page PDF opens", await ready());
