@@ -338,7 +338,11 @@ export class ToolController {
 		this.annotations()?.updateAnnotation(o.pageIndex, o.id, strokePattern(style, o.strokeWidth ?? 1));
 	}
 
+	/** Bumped when the settings change from the settings tab (the viewer re-renders for those only). */
+	settingsVersion = 0;
+
 	pushAllStyles() {
+		this.settingsVersion++;
 		for (const t of ["pen", "marker", "textHighlight", "text", "shape"] as ToolId[]) this.pushStyle(t);
 	}
 

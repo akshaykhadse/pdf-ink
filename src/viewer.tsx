@@ -35,7 +35,7 @@ import { fontFormat, lineStyleOf } from "./formats";
 import { LineStyleGlyph } from "./toolbar";
 import { LINE_STYLES } from "./settings";
 import { TEXT_BOX_WIDTH, TEXT_PLACEHOLDER, fitTextBox, keepTapsInTextBox, textLineHeight } from "./text-box";
-import { Backlink, LinkVars, PageRect, fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "./links";
+import { Backlink, LinkVars, PageRect, fillTemplate, linkText, parseSubpath, rectFromParam, rectParam } from "./links";
 import { Icon } from "./icon";
 
 /** What the Obsidian view provides to the viewer. */
@@ -281,7 +281,14 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		restoreTextFonts();
 		const capture: any = (registry.getPlugin("capture") as any)?.provides()?.forDocument(documentId);
 		const offCapture = capture?.onCaptureArea?.((e: any) => setArea({ pageIndex: e.pageIndex, rect: toRect(e.rect) }));
-		const offTools = tools.subscribe(() => bump((n) => n + 1));
+		// The toolbar follows zoom, page, history and styles itself; the pages only change with the tool or the settings.
+		let seenTool = tools.tool, seenSettings = tools.settingsVersion;
+		const offTools = tools.subscribe(() => {
+			if (tools.tool === seenTool && tools.settingsVersion === seenSettings) return;
+			seenTool = tools.tool;
+			seenSettings = tools.settingsVersion;
+			bump((n) => n + 1);
+		});
 		const scroll: any = (registry.getPlugin("scroll") as any)?.provides()?.forDocument(documentId);
 		const position = (metrics?: any): ReadingPosition | null => {
 			const m = metrics ?? scroll?.getMetrics?.();
@@ -309,7 +316,11 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 				tools.pushAllStyles();
 				tools.notify();
 			},
-			refreshBacklinks: () => setBacklinks(host.backlinks()),
+			refreshBacklinks: () => {
+				// Obsidian re-resolves links after edits anywhere in the vault: re-render only when this PDF's backlinks changed.
+				const next = host.backlinks();
+				setBacklinks((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+			},
 			position: () => position(),
 			restore: (pos) => scroll?.scrollToPage?.({ pageNumber: pos.page, pageCoordinates: { x: 0, y: pos.y }, behavior: "instant" }),
 			goTo: (subpath) => {
