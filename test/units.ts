@@ -4,6 +4,9 @@ import { fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union }
 import { DEFAULT_SETTINGS, defaultSettings, normalizeSettings, parseColors, parseNumbers } from "../src/settings";
 import { annotationHit, tapHit } from "../src/guard";
 import { dotSize } from "../src/toolbar";
+import { fitTextBox, wrapLines } from "../src/text-box";
+import { toolOfAnnotation } from "../src/tools";
+import { fontFormat, lineStyleOf, standardFont, strokePattern } from "../src/formats";
 
 let failed = false;
 const check = (name: string, ok: boolean, detail?: unknown) => {
@@ -48,12 +51,29 @@ const ink = { type: 15, strokeWidth: 2, inkList: [{ points: [{ x: 0, y: 0 }, { x
 check("annotationHit finds an ink segment within the radius", annotationHit(ink, 5, 2, 1.5) && !annotationHit(ink, 5, 5, 1.5));
 const hl = { type: 9, segmentRects: [{ origin: { x: 0, y: 0 }, size: { width: 10, height: 4 } }] };
 check("annotationHit finds a highlight box", annotationHit(hl, 11, 2, 2) && !annotationHit(hl, 15, 2, 2));
+const sbox = { origin: { x: 10, y: 10 }, size: { width: 100, height: 50 } };
+check("annotationHit takes a rectangle by its outline only", annotationHit({ type: 5, rect: sbox, strokeWidth: 2 }, 11, 30, 1) && !annotationHit({ type: 5, rect: sbox, strokeWidth: 2 }, 60, 35, 1));
+check("annotationHit takes an ellipse by its outline only", annotationHit({ type: 6, rect: sbox, strokeWidth: 2 }, 60, 11, 1) && !annotationHit({ type: 6, rect: sbox, strokeWidth: 2 }, 60, 35, 1) && !annotationHit({ type: 6, rect: sbox, strokeWidth: 2 }, 12, 12, 1));
+check("annotationHit takes a line or arrow along its length", annotationHit({ type: 4, linePoints: { start: { x: 0, y: 0 }, end: { x: 100, y: 0 } }, strokeWidth: 2 }, 50, 1.5, 1) && !annotationHit({ type: 4, linePoints: { start: { x: 0, y: 0 }, end: { x: 100, y: 0 } }, strokeWidth: 2 }, 50, 5, 1));
+check("annotationHit takes a text sbox anywhere inside", annotationHit({ type: 3, rect: sbox }, 60, 35, 1) && !annotationHit({ type: 3, rect: sbox }, 200, 35, 1));
 check("annotationHit ignores other types", !annotationHit({ type: 1, rect: { origin: { x: 0, y: 0 }, size: { width: 9, height: 9 } } }, 1, 1, 5));
 
 // toolbar
 check("dotSize grows with width and stays within bounds", dotSize(0.25) >= 2 && dotSize(1) < dotSize(4) && dotSize(40) <= 10);
 
-if (failed) process.exit(1);
+
+// text, arrows and shapes
+const ns = normalizeSettings({ shapeKind: "star" as any, text: { color: "#ABCDEF", width: 500, opacity: 1 }, textSizes: [2, 12, 200] });
+check("normalizeSettings repairs the shape kind and text size", ns.shapeKind === "arrow" && ns.text.color === "#abcdef" && ns.text.width === 96 && JSON.stringify(ns.textSizes) === "[12]", [ns.shapeKind, ns.text, ns.textSizes]);
+check("defaults include text and shape palettes", DEFAULT_SETTINGS.textColors.length > 0 && DEFAULT_SETTINGS.shapeColors.length > 0 && DEFAULT_SETTINGS.shapeWidths.length > 0 && normalizeSettings({}).shapeKind === "arrow");
+check("toolOfAnnotation maps annotations to their tools", [toolOfAnnotation({ type: 15 }), toolOfAnnotation({ type: 15, intent: "InkHighlight" }), toolOfAnnotation({ type: 9 }), toolOfAnnotation({ type: 3 }), toolOfAnnotation({ type: 4, intent: "LineArrow" }), toolOfAnnotation({ type: 5 }), toolOfAnnotation({ type: 6 }), toolOfAnnotation({ type: 13 })].join() === "pen,marker,textHighlight,text,shape,shape,shape,");
+const mono = (t: string, size: number) => t.length * size * 0.5;
+check("wrapLines wraps at the width and keeps line breaks", JSON.stringify(wrapLines("aa bb cc\ndd", 30, (t) => mono(t, 10))) === JSON.stringify(["aa bb", "cc", "dd"]), wrapLines("aa bb cc\ndd", 30, (t) => mono(t, 10)));
+const grown = fitTextBox({ contents: "a fairly long line of text", fontSize: 10, rect: { origin: { x: 10, y: 10 }, size: { width: 40, height: 16 } } }, { width: 595, height: 842 }, mono);
+check("fitTextBox widens a box for its text", grown && grown.size.width > 120 && grown.size.height === 16, grown);
+const capped = fitTextBox({ contents: "word ".repeat(80).trim(), fontSize: 10, rect: { origin: { x: 500, y: 10 }, size: { width: 40, height: 16 } } }, { width: 595, height: 842 }, mono);
+check("fitTextBox stops at the page edge and grows taller instead", capped && capped.size.width === 95 && capped.size.height > 100, capped);
+check("fitTextBox leaves a box that fits alone", fitTextBox({ contents: "hi", fontSize: 10, rect: { origin: { x: 0, y: 0 }, size: { width: 100, height: 20 } } }, { width: 595, height: 842 }, mono) === null);
 
 // tapHit: what a pointer-tool tap selects
 const box = (x: number, y: number, w: number, h: number) => ({ origin: { x, y }, size: { width: w, height: h } });
@@ -62,3 +82,10 @@ check("tapHit: a line by its segment, not its whole box", tapHit({ type: 4, rect
 check("tapHit: a hollow box by its outline, a filled one inside", tapHit({ type: 5, rect: box(0, 0, 20, 20), strokeWidth: 2 }, 0.5, 10, 1) && !tapHit({ type: 5, rect: box(0, 0, 20, 20), strokeWidth: 2 }, 10, 10, 1) && tapHit({ type: 5, rect: box(0, 0, 20, 20), color: "#ff0000" }, 10, 10, 1));
 check("tapHit: a hollow ellipse by its outline", tapHit({ type: 6, rect: box(0, 0, 20, 10), strokeWidth: 1 }, 10, 0.2, 1) && !tapHit({ type: 6, rect: box(0, 0, 20, 10), strokeWidth: 1 }, 10, 5, 1));
 check("tapHit: text and images by their box", tapHit({ type: 3, rect: box(0, 0, 20, 10) }, 10, 5, 1) && !tapHit({ type: 13, rect: box(0, 0, 20, 10) }, 30, 5, 1));
+// formats
+check("standardFont maps family, bold and italic to PDF standard fonts", [standardFont({ font: "sans", bold: false, italic: false }), standardFont({ font: "serif", bold: true, italic: true }), standardFont({ font: "mono", bold: false, italic: true })].join() === "4,10,3");
+check("fontFormat inverts standardFont", JSON.stringify(fontFormat(10)) === JSON.stringify({ font: "serif", bold: true, italic: true }) && fontFormat(13).font === "sans");
+check("strokePattern scales dashes with width", JSON.stringify(strokePattern("dashed", 2)) === JSON.stringify({ strokeStyle: 2, strokeDashArray: [6, 4] }) && strokePattern("solid", 2).strokeStyle === 1 && strokePattern("dotted", 0.5).strokeDashArray![0] === 1);
+check("lineStyleOf reads dashes and dots back", lineStyleOf({ strokeStyle: 2, strokeDashArray: [6, 4], strokeWidth: 2 }) === "dashed" && lineStyleOf({ strokeStyle: 2, strokeDashArray: [2, 4], strokeWidth: 2 }) === "dotted" && lineStyleOf({ strokeStyle: 1 }) === "solid");
+check("normalizeSettings repairs text format and line settings", (() => { const n = normalizeSettings({ textFormat: { font: "comic", bold: 1 } as any, shapeLine: { style: "wavy", end: "circle" } as any }); return n.textFormat.font === "sans" && n.textFormat.bold === false && n.shapeLine.style === "solid" && n.shapeLine.end === "circle" && n.shapeLine.start === "none"; })());
+if (failed) process.exit(1);

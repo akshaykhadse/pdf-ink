@@ -10,18 +10,37 @@
  *   eraser        our own interaction mode; the pointer guard removes what it crosses.
  *   areaLink      EmbedPDF's capture plugin marquee (native); the rect becomes a link.
  *   image         EmbedPDF's `stamp` tool (native): a tap opens the file picker and places the picture there.
+ *   text          EmbedPDF's `freeText` tool (native): a tap (or a dragged box) adds a text box and starts typing.
+ *   shape         EmbedPDF's `lineArrow`, `line`, `square` or `circle` tool (native), by `settings.shapeKind`.
  */
-import type { Settings, ToolStyle } from "./settings";
+import type { Settings, ShapeKind, ShapeLine, TextFormat, ToolStyle } from "./settings";
+import { ALIGN_VALUE, LINE_END_VALUE, standardFont, strokePattern } from "./formats";
 
-export type ToolId = "hand" | "pointer" | "pen" | "marker" | "textHighlight" | "eraser" | "areaLink" | "image";
+export type ToolId = "hand" | "pointer" | "pen" | "marker" | "textHighlight" | "text" | "shape" | "eraser" | "areaLink" | "image";
 
-export const DRAWING_TOOLS: ReadonlySet<ToolId> = new Set<ToolId>(["pen", "marker", "textHighlight", "eraser", "areaLink", "image"]);
+export const DRAWING_TOOLS: ReadonlySet<ToolId> = new Set<ToolId>(["pen", "marker", "textHighlight", "text", "shape", "eraser", "areaLink", "image"]);
 /** Tools whose style (colour, width, opacity) can be changed. */
-export const STYLED_TOOLS: ReadonlySet<ToolId> = new Set<ToolId>(["pen", "marker", "textHighlight"]);
+export const STYLED_TOOLS: ReadonlySet<ToolId> = new Set<ToolId>(["pen", "marker", "textHighlight", "text", "shape"]);
 
 export const ERASER_MODE = "pdfInkEraser";
 
-const EMBED_TOOL: Record<string, string> = { pen: "ink", marker: "inkHighlighter", textHighlight: "highlight", image: "stamp" };
+/** PDF annotation subtypes (PdfAnnotationSubtype). */
+export const FREETEXT = 3, LINE = 4, SQUARE = 5, CIRCLE = 6, HIGHLIGHT = 9, INK = 15;
+
+/** EmbedPDF tool id for each shape kind. */
+export const SHAPE_TOOL: Record<ShapeKind, string> = { arrow: "lineArrow", line: "line", rectangle: "square", ellipse: "circle" };
+
+const EMBED_TOOL: Record<string, string> = { pen: "ink", marker: "inkHighlighter", textHighlight: "highlight", image: "stamp", text: "freeText" };
+
+/** Which styled tool an existing annotation belongs to (for restyling a selection), or null. */
+export function toolOfAnnotation(o: any): ToolId | null {
+	if (!o) return null;
+	if (o.type === INK) return o.intent === "InkHighlight" ? "marker" : "pen";
+	if (o.type === HIGHLIGHT) return "textHighlight";
+	if (o.type === FREETEXT && o.intent !== "FreeTextCallout") return "text";
+	if (o.type === LINE || o.type === SQUARE || o.type === CIRCLE) return "shape";
+	return null;
+}
 
 export interface ToolState {
 	tool: ToolId;
@@ -144,13 +163,16 @@ export class ToolController {
 		const ann = this.annotations();
 		const capture = this.plugin("capture")?.forDocument(this.documentId);
 		if (tool === "eraser" && this._tool !== "eraser") this.previousTool = this._tool;
+		// A text box being typed in commits its text on blur; end the edit before the tool changes.
+		const focused = (globalThis as any).activeDocument?.activeElement ?? globalThis.document?.activeElement;
+		if (focused?.isContentEditable) focused.blur();
 		this._tool = tool;
 		this.applying = true;
 		try {
 			ann?.deselectAnnotation?.();
 			this.plugin("selection")?.forDocument(this.documentId)?.clear?.();
 			if (tool !== "areaLink" && capture?.isMarqueeCaptureActive?.()) capture.disableMarqueeCapture();
-			const embedTool = EMBED_TOOL[tool];
+			const embedTool = this.embedTool(tool);
 			if (embedTool) {
 				this.pushStyle(tool);
 				if (ann?.getActiveTool?.()?.id !== embedTool) ann?.setActiveTool?.(embedTool);
@@ -170,7 +192,7 @@ export class ToolController {
 
 	private modeChanged(mode: string) {
 		if (this.applying) return;
-		const byMode: Record<string, ToolId> = { panMode: "hand", pointerMode: "pointer", ink: "pen", inkHighlighter: "marker", highlight: "textHighlight", stamp: "image", [ERASER_MODE]: "eraser", marqueeCapture: "areaLink" };
+		const byMode: Record<string, ToolId> = { panMode: "hand", pointerMode: "pointer", ink: "pen", inkHighlighter: "marker", highlight: "textHighlight", stamp: "image", freeText: "text", lineArrow: "shape", line: "shape", square: "shape", circle: "shape", [ERASER_MODE]: "eraser", marqueeCapture: "areaLink" };
 		const tool = byMode[mode];
 		if (this._tool === "areaLink" && mode === "pointerMode") {
 			// The capture plugin leaves its mode after each capture; the tool stays until the user picks another.
@@ -195,11 +217,32 @@ export class ToolController {
 
 	// ---------------------------------------------------------------- style
 
+	/** The EmbedPDF tool behind one of ours (the shape tool depends on the chosen kind). */
+	private embedTool(tool: ToolId): string | undefined {
+		return tool === "shape" ? SHAPE_TOOL[this.shapeKind] : EMBED_TOOL[tool];
+	}
+
+	get shapeKind(): ShapeKind {
+		return this.host.settings().shapeKind;
+	}
+
+	/** Picks what the shape tool draws and switches to it. */
+	setShapeKind(kind: ShapeKind) {
+		const s = this.host.settings();
+		if (s.shapeKind !== kind) {
+			s.shapeKind = kind;
+			this.host.saveSettings();
+		}
+		this.setTool("shape");
+	}
+
 	style(tool: ToolId = this._tool): ToolStyle | null {
 		const s = this.host.settings();
 		if (tool === "pen") return s.pen;
 		if (tool === "marker") return s.marker;
 		if (tool === "textHighlight") return s.textHighlight;
+		if (tool === "text") return s.text;
+		if (tool === "shape") return s.shape;
 		return null;
 	}
 
@@ -213,30 +256,90 @@ export class ToolController {
 		const ann = this.annotations();
 		for (const a of ann?.getSelectedAnnotations?.() ?? []) {
 			const o = a.object;
-			const matches = (tool === "pen" && o.type === 15 && o.intent !== "InkHighlight") || (tool === "marker" && o.type === 15 && o.intent === "InkHighlight") || (tool === "textHighlight" && o.type === 9);
-			if (matches) ann.updateAnnotation(o.pageIndex, o.id, this.annotationPatch(tool, patch));
+			if (toolOfAnnotation(o) === tool) ann.updateAnnotation(o.pageIndex, o.id, this.annotationPatch(tool, patch));
 		}
 		this.notify();
 	}
 
 	private annotationPatch(tool: ToolId, style: Partial<ToolStyle>): Record<string, unknown> {
 		const p: Record<string, unknown> = {};
-		if (style.color !== undefined) (p.strokeColor = style.color), (p.color = style.color);
+		if (tool === "text") {
+			// Free text: the colour is the font's; `color` would fill the box.
+			if (style.color !== undefined) p.fontColor = style.color;
+			if (style.width !== undefined) p.fontSize = style.width;
+		} else if (tool === "shape") {
+			// Shapes: `color` is the interior fill, which stays transparent.
+			if (style.color !== undefined) p.strokeColor = style.color;
+			if (style.width !== undefined) {
+				p.strokeWidth = style.width;
+				// Dashes and dots scale with the width.
+				Object.assign(p, strokePattern(this.host.settings().shapeLine.style, style.width));
+			}
+		} else {
+			if (style.color !== undefined) (p.strokeColor = style.color), (p.color = style.color);
+			if (style.width !== undefined && tool !== "textHighlight") p.strokeWidth = style.width;
+		}
 		if (style.opacity !== undefined) p.opacity = style.opacity;
-		if (style.width !== undefined && tool !== "textHighlight") p.strokeWidth = style.width;
 		return p;
 	}
 
 	/** Pushes a tool's current style into EmbedPDF's tool defaults. */
 	pushStyle(tool: ToolId = this._tool) {
 		const style = this.style(tool);
-		const embedTool = EMBED_TOOL[tool];
-		if (!style || !embedTool) return;
-		this.plugin("annotation")?.setToolDefaults?.(embedTool, this.annotationPatch(tool, style));
+		if (!style) return;
+		const s = this.host.settings();
+		const embedTools = tool === "shape" ? Object.values(SHAPE_TOOL) : [EMBED_TOOL[tool]].filter(Boolean);
+		for (const id of embedTools) {
+			const patch = this.annotationPatch(tool, style);
+			if (tool === "text") Object.assign(patch, this.textFormatPatch(s.textFormat));
+			if (id === SHAPE_TOOL.arrow) patch.lineEndings = this.lineEndsPatch(s.shapeLine);
+			this.plugin("annotation")?.setToolDefaults?.(id, patch);
+		}
+	}
+
+	private textFormatPatch(f: TextFormat): Record<string, unknown> {
+		const fontFamily = standardFont(f);
+		// PDFium writes a non-Helvetica font into the DA under a name it cannot read back (fontFamily -1 on reopen);
+		// the font is kept in EmbedPDF's custom data too, and restored on load (restoreTextFonts).
+		return { fontFamily, textAlign: ALIGN_VALUE[f.align], custom: { pdfInkFont: fontFamily } };
+	}
+
+	private lineEndsPatch(l: ShapeLine): { start: number; end: number } {
+		return { start: LINE_END_VALUE[l.start], end: LINE_END_VALUE[l.end] };
+	}
+
+	/** Changes the text tool's font, bold, italic or alignment (and that of selected text boxes). */
+	setTextFormat(patch: Partial<TextFormat>) {
+		const s = this.host.settings();
+		Object.assign(s.textFormat, patch);
+		this.pushStyle("text");
+		this.host.saveSettings();
+		const ann = this.annotations();
+		for (const a of ann?.getSelectedAnnotations?.() ?? []) if (toolOfAnnotation(a.object) === "text") ann.updateAnnotation(a.object.pageIndex, a.object.id, this.textFormatPatch(s.textFormat));
+		this.notify();
+	}
+
+	/** Changes the line style of arrows, lines and shapes, or the arrow's ends. */
+	setShapeLine(patch: Partial<ShapeLine>) {
+		const s = this.host.settings();
+		Object.assign(s.shapeLine, patch);
+		this.pushStyle("shape");
+		this.host.saveSettings();
+		this.notify();
+	}
+
+	/** Formats one existing text box (from its selection menu): one undo step. */
+	formatTextBox(o: any, patch: Partial<TextFormat>, current: TextFormat) {
+		this.annotations()?.updateAnnotation(o.pageIndex, o.id, this.textFormatPatch({ ...current, ...patch }));
+	}
+
+	/** Sets the line style of one existing arrow, line or shape (from its selection menu). */
+	setAnnotationLineStyle(o: any, style: ShapeLine["style"]) {
+		this.annotations()?.updateAnnotation(o.pageIndex, o.id, strokePattern(style, o.strokeWidth ?? 1));
 	}
 
 	pushAllStyles() {
-		for (const t of ["pen", "marker", "textHighlight"] as ToolId[]) this.pushStyle(t);
+		for (const t of ["pen", "marker", "textHighlight", "text", "shape"] as ToolId[]) this.pushStyle(t);
 	}
 
 	// -------------------------------------------------------------- actions
@@ -286,10 +389,12 @@ export class ToolController {
 	recolorMany(items: { pageIndex: number; id: string }[], color: string): number {
 		const ann = this.annotations();
 		if (!ann || !items.length) return 0;
-		const originals = items.map((it) => ann.getAnnotationById?.(it.id)?.object).filter((o: any) => o && (o.type === 15 || o.type === 9));
+		const originals = items.map((it) => ann.getAnnotationById?.(it.id)?.object).filter((o: any) => toolOfAnnotation(o) !== null);
 		if (!originals.length) return 0;
-		const before = originals.map((o: any) => ({ pageIndex: o.pageIndex, id: o.id, strokeColor: o.strokeColor, color: o.color }));
-		const apply = (c: string) => this.quietly(() => originals.forEach((o: any) => ann.updateAnnotation(o.pageIndex, o.id, { strokeColor: c, color: c })));
+		/** The colour fields of each kind: text has a font colour, shapes keep their (transparent) fill. */
+		const colorPatch = (o: any, c: string): Record<string, unknown> => (o.type === FREETEXT ? { fontColor: c } : o.type === LINE || o.type === SQUARE || o.type === CIRCLE ? { strokeColor: c } : { strokeColor: c, color: c });
+		const before = originals.map((o: any) => ({ pageIndex: o.pageIndex, id: o.id, patch: o.type === FREETEXT ? { fontColor: o.fontColor } : o.type === LINE || o.type === SQUARE || o.type === CIRCLE ? { strokeColor: o.strokeColor } : { strokeColor: o.strokeColor, color: o.color } }));
+		const apply = (c: string) => this.quietly(() => originals.forEach((o: any) => ann.updateAnnotation(o.pageIndex, o.id, colorPatch(o, c))));
 		apply(color);
 		const history = this.plugin("history")?.forDocument(this.documentId);
 		if (history) {
@@ -297,7 +402,7 @@ export class ToolController {
 			history.register(
 				{
 					execute: () => (first ? void (first = false) : apply(color)),
-					undo: () => this.quietly(() => before.forEach((b) => ann.updateAnnotation(b.pageIndex, b.id, { strokeColor: b.strokeColor, color: b.color }))),
+					undo: () => this.quietly(() => before.forEach((b) => ann.updateAnnotation(b.pageIndex, b.id, b.patch))),
 					metadata: { source: "pdf-ink", annotationIds: originals.map((o: any) => o.id) },
 				},
 				"annotations"
@@ -307,7 +412,8 @@ export class ToolController {
 		return originals.length;
 	}
 
-	private quietly(fn: () => void) {
+	/** Runs annotation changes without EmbedPDF history entries. */
+	quietly(fn: () => void) {
 		const instance: any = this.registry?.getPlugin?.("annotation");
 		if (!instance || !("history" in instance)) return fn();
 		const h = instance.history;
