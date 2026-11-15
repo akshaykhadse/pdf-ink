@@ -6,6 +6,7 @@ import { annotationHit, tapHit } from "../src/guard";
 import { dotSize } from "../src/toolbar";
 import { fitTextBox, wrapLines } from "../src/text-box";
 import { toolOfAnnotation } from "../src/tools";
+import { fontFormat, lineStyleOf, standardFont, strokePattern } from "../src/formats";
 
 let failed = false;
 const check = (name: string, ok: boolean, detail?: unknown) => {
@@ -81,4 +82,10 @@ check("tapHit: a line by its segment, not its whole box", tapHit({ type: 4, rect
 check("tapHit: a hollow box by its outline, a filled one inside", tapHit({ type: 5, rect: box(0, 0, 20, 20), strokeWidth: 2 }, 0.5, 10, 1) && !tapHit({ type: 5, rect: box(0, 0, 20, 20), strokeWidth: 2 }, 10, 10, 1) && tapHit({ type: 5, rect: box(0, 0, 20, 20), color: "#ff0000" }, 10, 10, 1));
 check("tapHit: a hollow ellipse by its outline", tapHit({ type: 6, rect: box(0, 0, 20, 10), strokeWidth: 1 }, 10, 0.2, 1) && !tapHit({ type: 6, rect: box(0, 0, 20, 10), strokeWidth: 1 }, 10, 5, 1));
 check("tapHit: text and images by their box", tapHit({ type: 3, rect: box(0, 0, 20, 10) }, 10, 5, 1) && !tapHit({ type: 13, rect: box(0, 0, 20, 10) }, 30, 5, 1));
+// formats
+check("standardFont maps family, bold and italic to PDF standard fonts", [standardFont({ font: "sans", bold: false, italic: false }), standardFont({ font: "serif", bold: true, italic: true }), standardFont({ font: "mono", bold: false, italic: true })].join() === "4,10,3");
+check("fontFormat inverts standardFont", JSON.stringify(fontFormat(10)) === JSON.stringify({ font: "serif", bold: true, italic: true }) && fontFormat(13).font === "sans");
+check("strokePattern scales dashes with width", JSON.stringify(strokePattern("dashed", 2)) === JSON.stringify({ strokeStyle: 2, strokeDashArray: [6, 4] }) && strokePattern("solid", 2).strokeStyle === 1 && strokePattern("dotted", 0.5).strokeDashArray![0] === 1);
+check("lineStyleOf reads dashes and dots back", lineStyleOf({ strokeStyle: 2, strokeDashArray: [6, 4], strokeWidth: 2 }) === "dashed" && lineStyleOf({ strokeStyle: 2, strokeDashArray: [2, 4], strokeWidth: 2 }) === "dotted" && lineStyleOf({ strokeStyle: 1 }) === "solid");
+check("normalizeSettings repairs text format and line settings", (() => { const n = normalizeSettings({ textFormat: { font: "comic", bold: 1 } as any, shapeLine: { style: "wavy", end: "circle" } as any }); return n.textFormat.font === "sans" && n.textFormat.bold === false && n.shapeLine.style === "solid" && n.shapeLine.end === "circle" && n.shapeLine.start === "none"; })());
 if (failed) process.exit(1);

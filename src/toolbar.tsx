@@ -8,7 +8,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { Icon } from "./icon";
-import { SHAPE_KINDS, type Settings, type ShapeKind } from "./settings";
+import { LINE_ENDS, LINE_STYLES, SHAPE_KINDS, TEXT_ALIGNS, TEXT_FONTS, type LineEnd, type LineStyle, type Settings, type ShapeKind, type TextFont } from "./settings";
 import { STYLED_TOOLS, ToolController, ToolId } from "./tools";
 
 const MAX_LEVEL = 4;
@@ -293,10 +293,104 @@ function ToolOptions({ tools, settings }: { tools: ToolController; settings: Set
 					))}
 				</div>
 			)}
+			{tool === "text" && <TextFormatRow tools={tools} settings={settings} />}
+			{tool === "shape" && (
+				<div class="pdf-ink-group pdf-ink-line-styles">
+					{LINE_STYLES.map((ls) => (
+						<button key={ls} class={"pdf-ink-swatch pdf-ink-line-style" + (settings.shapeLine.style === ls ? " is-active" : "")} aria-label={LINE_STYLE_LABEL[ls]} data-line-style={ls} onClick={() => tools.setShapeLine({ style: ls })}>
+							<LineStyleGlyph style={ls} />
+						</button>
+					))}
+				</div>
+			)}
+			{tool === "shape" && settings.shapeKind === "arrow" && (["start", "end"] as const).map((side) => (
+				<div key={side} class="pdf-ink-group pdf-ink-line-ends" data-side={side}>
+					<span class="pdf-ink-row-label">{side === "start" ? "Start" : "End"}</span>
+					{LINE_ENDS.map((le) => (
+						<button key={le} class={"pdf-ink-swatch pdf-ink-line-end" + (settings.shapeLine[side] === le ? " is-active" : "")} aria-label={`${side === "start" ? "Start" : "End"}: ${LINE_END_LABEL[le]}`} data-end={le} onClick={() => tools.setShapeLine({ [side]: le })}>
+							<LineEndGlyph end={le} />
+						</button>
+					))}
+				</div>
+			))}
 			<div class="pdf-ink-group pdf-ink-opacity">
 				<Icon name="blend|droplet" />
 				<input type="range" min={5} max={100} step={5} value={Math.round(style.opacity * 100)} aria-label="Opacity" onInput={(e) => tools.setStyle(tool, { opacity: Number((e.target as HTMLInputElement).value) / 100 })} />
 			</div>
 		</div>
+	);
+}
+
+const FONT_LABEL: Record<TextFont, string> = { sans: "Sans serif (Helvetica)", serif: "Serif (Times)", mono: "Monospace (Courier)" };
+const FONT_CSS: Record<TextFont, string> = { sans: "Helvetica, Arial, sans-serif", serif: "Times, 'Times New Roman', serif", mono: "Courier, 'Courier New', monospace" };
+const ALIGN_ICON = { left: "align-left", center: "align-center", right: "align-right" } as const;
+
+/** Font family, bold, italic and alignment of the text tool. */
+function TextFormatRow({ tools, settings }: { tools: ToolController; settings: Settings }) {
+	const f = settings.textFormat;
+	return (
+		<>
+			<div class="pdf-ink-group pdf-ink-text-format">
+				{TEXT_FONTS.map((font) => (
+					<button key={font} class={"pdf-ink-swatch pdf-ink-font" + (f.font === font ? " is-active" : "")} aria-label={FONT_LABEL[font]} data-font={font} onClick={() => tools.setTextFormat({ font })}>
+						<span style={{ fontFamily: FONT_CSS[font] }}>Aa</span>
+					</button>
+				))}
+				<span class="pdf-ink-sep" />
+				<button class={"pdf-ink-swatch pdf-ink-font" + (f.bold ? " is-active" : "")} aria-label="Bold" aria-pressed={f.bold} onClick={() => tools.setTextFormat({ bold: !f.bold })}>
+					<b>B</b>
+				</button>
+				<button class={"pdf-ink-swatch pdf-ink-font" + (f.italic ? " is-active" : "")} aria-label="Italic" aria-pressed={f.italic} onClick={() => tools.setTextFormat({ italic: !f.italic })}>
+					<i style={{ fontFamily: "Times, serif" }}>I</i>
+				</button>
+			</div>
+			<div class="pdf-ink-group pdf-ink-text-align">
+				{TEXT_ALIGNS.map((align) => (
+					<button key={align} class={"pdf-ink-swatch" + (f.align === align ? " is-active" : "")} aria-label={`Align ${align}`} onClick={() => tools.setTextFormat({ align })}>
+						<Icon name={ALIGN_ICON[align]} />
+					</button>
+				))}
+			</div>
+		</>
+	);
+}
+
+const LINE_STYLE_LABEL: Record<LineStyle, string> = { solid: "Solid line", dashed: "Dashed line", dotted: "Dotted line" };
+const LINE_END_LABEL: Record<LineEnd, string> = { none: "none", openArrow: "open arrow", closedArrow: "closed arrow", circle: "circle", square: "square", diamond: "diamond", bar: "bar" };
+
+export function LineStyleGlyph({ style }: { style: LineStyle }) {
+	const dash = style === "dashed" ? "5 3" : style === "dotted" ? "2 3" : undefined;
+	return (
+		<svg class="pdf-ink-glyph" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+			<line x1="2" y1="10" x2="18" y2="10" stroke="currentColor" stroke-width="2" stroke-dasharray={dash} />
+		</svg>
+	);
+}
+
+/** A short line ending at the right in the given line end. */
+function LineEndGlyph({ end }: { end: LineEnd }) {
+	const head = (() => {
+		switch (end) {
+			case "openArrow":
+				return <polyline points="11,5 17,10 11,15" fill="none" stroke="currentColor" stroke-width="1.6" />;
+			case "closedArrow":
+				return <polygon points="11,5 17,10 11,15" fill="currentColor" stroke="currentColor" stroke-width="1" />;
+			case "circle":
+				return <circle cx="14" cy="10" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6" />;
+			case "square":
+				return <rect x="11" y="7" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.6" />;
+			case "diamond":
+				return <polygon points="14,6 18,10 14,14 10,10" fill="none" stroke="currentColor" stroke-width="1.6" />;
+			case "bar":
+				return <line x1="17" y1="5" x2="17" y2="15" stroke="currentColor" stroke-width="1.6" />;
+			default:
+				return null;
+		}
+	})();
+	return (
+		<svg class="pdf-ink-glyph" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+			<line x1="2" y1="10" x2={end === "none" ? 18 : end === "circle" || end === "square" ? 11 : end === "diamond" ? 10 : 16} y2="10" stroke="currentColor" stroke-width="1.6" />
+			{head}
+		</svg>
 	);
 }

@@ -1,3 +1,4 @@
+import { cssFont, fontFormat } from "./formats";
 /**
  * Text boxes (EmbedPDF free text) have a fixed size and clip what does not fit.
  * When typing ends, the box grows to fit its text: wider up to the page's right
@@ -18,12 +19,12 @@ export function textLineHeight(fontSize: number): number {
 }
 
 let ctx: CanvasRenderingContext2D | null | undefined;
-function measurer(): ((text: string, fontSize: number) => number) | null {
+function measurer(): ((text: string, fontSize: number, fontFamily?: number) => number) | null {
 	if (ctx === undefined) ctx = typeof document !== "undefined" ? document.createElement("canvas").getContext("2d") : null;
 	if (!ctx) return null;
 	const c = ctx;
-	return (text, fontSize) => {
-		c.font = `${fontSize}px Helvetica, Arial, sans-serif`;
+	return (text, fontSize, fontFamily = 4) => {
+		c.font = cssFont(fontFormat(fontFamily), fontSize);
 		return c.measureText(text).width;
 	};
 }
@@ -46,11 +47,11 @@ export function wrapLines(text: string, width: number, measure: (t: string) => n
 }
 
 /** The rect the box needs for its text, or null when it already fits. Only grows the box. */
-export function fitTextBox(a: any, pageSize: { width: number; height: number }, measureText = measurer()): any | null {
+export function fitTextBox(a: any, pageSize: { width: number; height: number }, measureText: ((text: string, fontSize: number, fontFamily?: number) => number) | null = measurer()): any | null {
 	const o = a?.rect?.origin, sz = a?.rect?.size;
 	if (!o || !sz || !measureText || typeof a.contents !== "string") return null;
 	const fontSize = a.fontSize || 12;
-	const measure = (t: string) => measureText(t, fontSize);
+	const measure = (t: string) => measureText(t, fontSize, a.fontFamily);
 	const maxWidth = Math.max(sz.width, pageSize.width - o.x);
 	// Slack for the difference between the browser's Helvetica stand-in and PDFium's metrics.
 	const longest = Math.max(0, ...a.contents.split("\n").map(measure)) * 1.06 + PAD + fontSize * 0.5;

@@ -31,6 +31,9 @@ import { PdfInkRenderers } from "./ink-preview";
 import { installAnnotationMemo } from "./memo-annotations";
 import { forgetStampSource, rememberStampSource } from "./stamp";
 import { FREETEXT, LINE, SQUARE, CIRCLE, SHAPE_TOOL, ToolController } from "./tools";
+import { fontFormat, lineStyleOf } from "./formats";
+import { LineStyleGlyph } from "./toolbar";
+import { LINE_STYLES } from "./settings";
 import { TEXT_BOX_WIDTH, TEXT_PLACEHOLDER, fitTextBox, keepTapsInTextBox, textLineHeight } from "./text-box";
 import { Backlink, LinkVars, PageRect, fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "./links";
 import { Icon } from "./icon";
@@ -226,25 +229,47 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		const offTextTaps = keepTapsInTextBox(root, () => tools.tool === "text");
 		const annotations: any = (registry.getPlugin("annotation") as any)?.provides();
 		const scoped = annotations?.forDocument(documentId);
-		/** Text boxes whose typed text is waiting to be committed. */
-		const textEdits = new Set<string>();
+		/** Text boxes with a change waiting to be committed: true when it is typed text. */
+		const textEdits = new Map<string, boolean>();
+		/**
+		 * PDFium reads a text box's font back only for Helvetica (other standard fonts come back as
+		 * Unknown, -1); the font we set is also in the annotation's custom data, so put it back.
+		 * Not an edit: the file is not marked changed. Not native to EmbedPDF.
+		 */
+		let restoringFonts = false;
+		const restoreTextFonts = () => {
+			const wrong = (scoped?.getAnnotations?.() ?? []).map((t: any) => t?.object).filter((o: any) => o?.type === FREETEXT && typeof o.custom?.pdfInkFont === "number" && o.fontFamily !== o.custom.pdfInkFont);
+			if (!wrong.length) return;
+			restoringFonts = true;
+			try {
+				tools.quietly(() => wrong.forEach((o: any) => scoped.updateAnnotation(o.pageIndex, o.id, { fontFamily: o.custom.pdfInkFont })));
+			} finally {
+				restoringFonts = false;
+			}
+		};
 		const offAnn = scoped?.onAnnotationEvent?.((event: any) => {
+			if (event.type === "loaded") restoreTextFonts();
 			// Commits re-emit every event with committed: true; only new edits mark the file dirty.
-			if (event.type !== "loaded" && !event.committed) host.onChange();
+			if (event.type !== "loaded" && !event.committed && !restoringFonts) host.onChange();
 			// A new stamp carries its image bytes; keep them so it shows at once (see stamp.tsx).
 			if (event.type === "create" && !event.committed && event.annotation?.type === PdfAnnotationSubtype.STAMP && event.ctx?.data) rememberStampSource(event.annotation.id, event.ctx.data);
 			if (event.type === "delete" && event.committed) forgetStampSource(event.annotation?.id);
 			// Typing in a text box ended (EmbedPDF writes the text on blur): once that is committed, drop a box left
 			// empty or untouched, or grow it to fit its text. Not native to EmbedPDF.
-			if (event.type === "update" && event.annotation?.type === FREETEXT && typeof event.patch?.contents === "string") {
+			// A new font or size can need a bigger box too.
+			if (event.type === "update" && event.annotation?.type === FREETEXT && event.patch) {
 				const id = event.annotation.id, pageIndex = event.pageIndex ?? event.annotation.pageIndex;
-				if (!event.committed) textEdits.add(id);
-				else if (textEdits.delete(id)) {
+				if (!event.committed) {
+					if (typeof event.patch.contents === "string") textEdits.set(id, true);
+					else if ("fontFamily" in event.patch || "fontSize" in event.patch) textEdits.set(id, textEdits.get(id) ?? false);
+				} else if (textEdits.has(id)) {
+					const typed = textEdits.get(id);
+					textEdits.delete(id);
 					setTimeout(() => {
 						const current = scoped?.getAnnotationById?.(id)?.object;
 						if (!current) return;
 						const text = (current.contents ?? "").trim();
-						if (!text || text === TEXT_PLACEHOLDER) return void scoped.deleteAnnotation(pageIndex, id);
+						if (typed && (!text || text === TEXT_PLACEHOLDER)) return void scoped.deleteAnnotation(pageIndex, id);
 						const size = pagesRef.current[pageIndex]?.size;
 						const rect = size && fitTextBox(current, size);
 						// Not an undo step of its own: undoing the text leaves the box size, which is harmless.
@@ -253,6 +278,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 				}
 			}
 		});
+		restoreTextFonts();
 		const capture: any = (registry.getPlugin("capture") as any)?.provides()?.forDocument(documentId);
 		const offCapture = capture?.onCaptureArea?.((e: any) => setArea({ pageIndex: e.pageIndex, rect: toRect(e.rect) }));
 		const offTools = tools.subscribe(() => bump((n) => n + 1));
@@ -421,6 +447,26 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		return (
 			<Menu wrapperProps={menuWrapperProps} placement={placement}>
 					{a && <Swatches objects={[a]} />}
+					{a?.type === FREETEXT && (() => {
+						// Bold and italic of this box; the family and alignment stay as they are.
+						const f = { ...settings.textFormat, ...fontFormat(a.fontFamily), align: (["left", "center", "right"] as const)[a.textAlign] ?? "left" };
+						return (
+							<>
+								<button class={"pdf-ink-menu-item" + (f.bold ? " is-active" : "")} aria-label="Bold" onClick={() => tools.formatTextBox(a, { bold: !f.bold }, f)}>
+									<b>B</b>
+								</button>
+								<button class={"pdf-ink-menu-item" + (f.italic ? " is-active" : "")} aria-label="Italic" onClick={() => tools.formatTextBox(a, { italic: !f.italic }, f)}>
+									<i style={{ fontFamily: "Times, serif" }}>I</i>
+								</button>
+							</>
+						);
+					})()}
+					{(a?.type === LINE || a?.type === SQUARE || a?.type === CIRCLE) &&
+						LINE_STYLES.map((ls) => (
+							<button key={ls} class={"pdf-ink-menu-item" + (lineStyleOf(a) === ls ? " is-active" : "")} aria-label={`${ls[0].toUpperCase()}${ls.slice(1)} line`} onClick={() => tools.setAnnotationLineStyle(a, ls)}>
+								<LineStyleGlyph style={ls} />
+							</button>
+						))}
 					{a && (
 						<button class="pdf-ink-menu-item" aria-label="Copy link to annotation" onClick={() => copyLink(pageIndex, toRect(a.rect), a.custom?.text ?? a.contents ?? `p.${pageIndex + 1}`, settings.areaLinkFormats[0]?.template ?? "[[{{file}}#page={{page}}&rect={{rect}}]]", a.strokeColor ?? "")}>
 							<Icon name="link" />

@@ -15,6 +15,35 @@ export interface ToolStyle {
 export type ShapeKind = "arrow" | "line" | "rectangle" | "ellipse";
 export const SHAPE_KINDS: readonly ShapeKind[] = ["arrow", "line", "rectangle", "ellipse"];
 
+/** The PDF standard font families a text box can use (PDF viewers all have them). */
+export type TextFont = "sans" | "serif" | "mono";
+export const TEXT_FONTS: readonly TextFont[] = ["sans", "serif", "mono"];
+export type TextAlign = "left" | "center" | "right";
+export const TEXT_ALIGNS: readonly TextAlign[] = ["left", "center", "right"];
+
+/** How the text tool sets its text. */
+export interface TextFormat {
+	font: TextFont;
+	bold: boolean;
+	italic: boolean;
+	align: TextAlign;
+}
+
+export type LineStyle = "solid" | "dashed" | "dotted";
+export const LINE_STYLES: readonly LineStyle[] = ["solid", "dashed", "dotted"];
+/** Line ends (PDF line ending styles). */
+export type LineEnd = "none" | "openArrow" | "closedArrow" | "circle" | "square" | "diamond" | "bar";
+export const LINE_ENDS: readonly LineEnd[] = ["none", "openArrow", "closedArrow", "circle", "square", "diamond", "bar"];
+
+/** The stroke of arrows, lines and shapes, and the arrow's ends. */
+export interface ShapeLine {
+	style: LineStyle;
+	/** Arrow tool only: the end where the drag started. */
+	start: LineEnd;
+	/** Arrow tool only: the end where the drag finished. */
+	end: LineEnd;
+}
+
 /** A named link template; variables: {{file}} {{page}} {{rect}} {{text}} {{color}} {{path}}. */
 export interface LinkFormat {
 	name: string;
@@ -47,6 +76,8 @@ export interface Settings {
 	shape: ToolStyle;
 	/** What the shape tool draws. */
 	shapeKind: ShapeKind;
+	textFormat: TextFormat;
+	shapeLine: ShapeLine;
 	/** Eraser diameter in CSS pixels. */
 	eraserSize: number;
 	/** Stylus mode: fingers pan and scroll, only the pen draws. Toggled from the toolbar too. */
@@ -89,6 +120,8 @@ export const DEFAULT_SETTINGS: Settings = {
 	text: { color: "#e03131", width: 14, opacity: 1 },
 	shape: { color: "#e03131", width: 2, opacity: 1 },
 	shapeKind: "arrow",
+	textFormat: { font: "sans", bold: false, italic: false, align: "left" },
+	shapeLine: { style: "solid", start: "none", end: "openArrow" },
 	eraserSize: 20,
 	stylusMode: false,
 	smoothStrokes: true,
@@ -178,6 +211,17 @@ export function normalizeSettings(raw: Partial<Settings> | null | undefined): Se
 		text: style(r.text, d.text, MIN_FONT, MAX_FONT),
 		shape: style(r.shape, d.shape),
 		shapeKind: SHAPE_KINDS.includes(r.shapeKind) ? r.shapeKind : d.shapeKind,
+		textFormat: {
+			font: TEXT_FONTS.includes(r.textFormat?.font) ? r.textFormat.font : d.textFormat.font,
+			bold: typeof r.textFormat?.bold === "boolean" ? r.textFormat.bold : d.textFormat.bold,
+			italic: typeof r.textFormat?.italic === "boolean" ? r.textFormat.italic : d.textFormat.italic,
+			align: TEXT_ALIGNS.includes(r.textFormat?.align) ? r.textFormat.align : d.textFormat.align,
+		},
+		shapeLine: {
+			style: LINE_STYLES.includes(r.shapeLine?.style) ? r.shapeLine.style : d.shapeLine.style,
+			start: LINE_ENDS.includes(r.shapeLine?.start) ? r.shapeLine.start : d.shapeLine.start,
+			end: LINE_ENDS.includes(r.shapeLine?.end) ? r.shapeLine.end : d.shapeLine.end,
+		},
 		eraserSize: clamp(r.eraserSize, 6, 120, d.eraserSize),
 		stylusMode: typeof r.stylusMode === "boolean" ? r.stylusMode : d.stylusMode,
 		smoothStrokes: typeof r.smoothStrokes === "boolean" ? r.smoothStrokes : d.smoothStrokes,

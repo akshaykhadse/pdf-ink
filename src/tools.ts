@@ -13,7 +13,8 @@
  *   text          EmbedPDF's `freeText` tool (native): a tap (or a dragged box) adds a text box and starts typing.
  *   shape         EmbedPDF's `lineArrow`, `line`, `square` or `circle` tool (native), by `settings.shapeKind`.
  */
-import type { Settings, ShapeKind, ToolStyle } from "./settings";
+import type { Settings, ShapeKind, ShapeLine, TextFormat, ToolStyle } from "./settings";
+import { ALIGN_VALUE, LINE_END_VALUE, standardFont, strokePattern } from "./formats";
 
 export type ToolId = "hand" | "pointer" | "pen" | "marker" | "textHighlight" | "text" | "shape" | "eraser" | "areaLink" | "image";
 
@@ -269,7 +270,11 @@ export class ToolController {
 		} else if (tool === "shape") {
 			// Shapes: `color` is the interior fill, which stays transparent.
 			if (style.color !== undefined) p.strokeColor = style.color;
-			if (style.width !== undefined) p.strokeWidth = style.width;
+			if (style.width !== undefined) {
+				p.strokeWidth = style.width;
+				// Dashes and dots scale with the width.
+				Object.assign(p, strokePattern(this.host.settings().shapeLine.style, style.width));
+			}
 		} else {
 			if (style.color !== undefined) (p.strokeColor = style.color), (p.color = style.color);
 			if (style.width !== undefined && tool !== "textHighlight") p.strokeWidth = style.width;
@@ -282,8 +287,55 @@ export class ToolController {
 	pushStyle(tool: ToolId = this._tool) {
 		const style = this.style(tool);
 		if (!style) return;
+		const s = this.host.settings();
 		const embedTools = tool === "shape" ? Object.values(SHAPE_TOOL) : [EMBED_TOOL[tool]].filter(Boolean);
-		for (const id of embedTools) this.plugin("annotation")?.setToolDefaults?.(id, this.annotationPatch(tool, style));
+		for (const id of embedTools) {
+			const patch = this.annotationPatch(tool, style);
+			if (tool === "text") Object.assign(patch, this.textFormatPatch(s.textFormat));
+			if (id === SHAPE_TOOL.arrow) patch.lineEndings = this.lineEndsPatch(s.shapeLine);
+			this.plugin("annotation")?.setToolDefaults?.(id, patch);
+		}
+	}
+
+	private textFormatPatch(f: TextFormat): Record<string, unknown> {
+		const fontFamily = standardFont(f);
+		// PDFium writes a non-Helvetica font into the DA under a name it cannot read back (fontFamily -1 on reopen);
+		// the font is kept in EmbedPDF's custom data too, and restored on load (restoreTextFonts).
+		return { fontFamily, textAlign: ALIGN_VALUE[f.align], custom: { pdfInkFont: fontFamily } };
+	}
+
+	private lineEndsPatch(l: ShapeLine): { start: number; end: number } {
+		return { start: LINE_END_VALUE[l.start], end: LINE_END_VALUE[l.end] };
+	}
+
+	/** Changes the text tool's font, bold, italic or alignment (and that of selected text boxes). */
+	setTextFormat(patch: Partial<TextFormat>) {
+		const s = this.host.settings();
+		Object.assign(s.textFormat, patch);
+		this.pushStyle("text");
+		this.host.saveSettings();
+		const ann = this.annotations();
+		for (const a of ann?.getSelectedAnnotations?.() ?? []) if (toolOfAnnotation(a.object) === "text") ann.updateAnnotation(a.object.pageIndex, a.object.id, this.textFormatPatch(s.textFormat));
+		this.notify();
+	}
+
+	/** Changes the line style of arrows, lines and shapes, or the arrow's ends. */
+	setShapeLine(patch: Partial<ShapeLine>) {
+		const s = this.host.settings();
+		Object.assign(s.shapeLine, patch);
+		this.pushStyle("shape");
+		this.host.saveSettings();
+		this.notify();
+	}
+
+	/** Formats one existing text box (from its selection menu): one undo step. */
+	formatTextBox(o: any, patch: Partial<TextFormat>, current: TextFormat) {
+		this.annotations()?.updateAnnotation(o.pageIndex, o.id, this.textFormatPatch({ ...current, ...patch }));
+	}
+
+	/** Sets the line style of one existing arrow, line or shape (from its selection menu). */
+	setAnnotationLineStyle(o: any, style: ShapeLine["style"]) {
+		this.annotations()?.updateAnnotation(o.pageIndex, o.id, strokePattern(style, o.strokeWidth ?? 1));
 	}
 
 	pushAllStyles() {
