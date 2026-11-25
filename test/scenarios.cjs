@@ -285,6 +285,164 @@ scenario("a blank page beside a rotated page", { pdf: "/rotated.pdf" }, async (h
 	h.check("it takes the rotated page's size and /Rotate", pages === '{"width":595,"height":842,"rotation":1},{"width":595,"height":842,"rotation":1},{"width":595,"height":842,"rotation":0}', pages);
 });
 
+scenario("a shape's line style, width and ends changed after drawing are saved", { shapeKind: "rectangle", shapeLine: { style: "solid", start: "none", end: "openArrow" } }, async (h) => {
+	const r = await h.pageRect(0);
+	const reopen = async () => {
+		await h.page.evaluate(async () => { await window.view.saveNow(true); await window.view.onUnloadFile(window.file); await window.view.onLoadFile(window.file); });
+		await h.ready();
+		await h.page.waitForTimeout(300);
+	};
+	await h.tool("shape");
+	await h.drag(r.x + 100, r.y + 100, r.x + 220, r.y + 200);
+	await reopen();
+	const rect = (await objs(h)).find((o) => o.type === 5);
+	h.check("a solid rectangle is drawn and saved", rect && rect.strokeStyle === 1, JSON.stringify(rect && [rect.strokeStyle, rect.strokeDashArray]));
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 5), "dotted")`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const dotted = (await objs(h)).find((o) => o.type === 5);
+	h.check("after reopening, the rectangle is dotted", dotted && dotted.strokeStyle === 2 && dotted.strokeDashArray?.length === 2, JSON.stringify(dotted && [dotted.strokeStyle, dotted.strokeDashArray]));
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 5), "dashed")`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const dashed = (await objs(h)).find((o) => o.type === 5);
+	h.check("after reopening, the rectangle is dashed", dashed && dashed.strokeStyle === 2 && dashed.strokeDashArray?.[0] === 3 * Math.max(1, dashed.strokeWidth), JSON.stringify(dashed && [dashed.strokeStyle, dashed.strokeDashArray, dashed.strokeWidth]));
+	await h.api(`tools.restyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 5), { width: 4 })`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const wide = (await objs(h)).find((o) => o.type === 5);
+	h.check("a new width is saved and the dashes scale with it", wide && wide.strokeWidth === 4 && wide.strokeStyle === 2 && wide.strokeDashArray?.[0] === 12, JSON.stringify(wide && [wide.strokeStyle, wide.strokeDashArray, wide.strokeWidth]));
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 5), "solid")`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const solid = (await objs(h)).find((o) => o.type === 5);
+	h.check("after reopening, the rectangle is solid again", solid && solid.strokeStyle === 1 && !solid.strokeDashArray?.length, JSON.stringify(solid && [solid.strokeStyle, solid.strokeDashArray]));
+	await h.api(`tools.restyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 5), { width: 2 })`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const thin = (await objs(h)).find((o) => o.type === 5);
+	h.check("a solid rectangle stays solid when its width changes", thin && thin.strokeWidth === 2 && thin.strokeStyle === 1, JSON.stringify(thin && [thin.strokeStyle, thin.strokeDashArray, thin.strokeWidth]));
+	// Arrows and lines share the border code: an arrow made dotted then solid stays solid.
+	await h.api(`tools.setShapeKind("arrow")`);
+	await h.tool("shape");
+	await h.drag(r.x + 100, r.y + 300, r.x + 260, r.y + 340);
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 4), "dotted")`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 4), "solid")`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const arrow = (await objs(h)).find((o) => o.type === 4);
+	h.check("an arrow made dotted and then solid is solid after reopening, with its ends", arrow && arrow.strokeStyle === 1 && arrow.lineEndings?.end === 4, JSON.stringify(arrow && [arrow.strokeStyle, arrow.strokeDashArray, arrow.lineEndings]));
+});
+
+scenario("every style, on new and on edited annotations, survives save and reopen", {}, async (h) => {
+	const r = await h.pageRect(0);
+	const z = r.width / 595;
+	const at = (px, py) => [r.x + px * z, r.y + py * z];
+	const FIELDS = ["intent", "blendMode", "strokeColor", "color", "fontColor", "strokeWidth", "opacity", "fontSize", "fontFamily", "textAlign", "strokeStyle", "strokeDashArray", "lineEndings", "contents"];
+	const snap = () => h.api(`Object.fromEntries(ann.getAnnotations().map((t) => [t.object.id, t.object]))`);
+	const near = (a, b, tol) => Math.abs(a - b) <= tol;
+	const same = (k, a, b) => {
+		// Not set and its default read back are the same thing.
+		const blank = { strokeDashArray: [], contents: "", color: "transparent" };
+		if (a === undefined || a === null) a = k in blank ? blank[k] : a;
+		if (b === undefined || b === null) b = k in blank ? blank[k] : b;
+		if (k === "blendMode") return (a ?? 0) === (b ?? 0);
+		if (k.endsWith("olor") && typeof a === "string" && typeof b === "string") {
+			if (a === "transparent" || b === "transparent") return a === b;
+			const c = (x) => [1, 3, 5].map((i) => parseInt(x.slice(i, i + 2), 16));
+			return c(a).every((v, i) => near(v, c(b)[i], 1));
+		}
+		if (typeof a === "number" && typeof b === "number") return near(a, b, k === "opacity" ? 0.01 : 0.02);
+		if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => near(v, b[i], 0.02));
+		if (a && b && typeof a === "object") return JSON.stringify(a) === JSON.stringify(b);
+		return a === b;
+	};
+	const reopen = async () => {
+		await h.page.evaluate(async () => { await window.view.saveNow(true); await window.view.onUnloadFile(window.file); await window.view.onLoadFile(window.file); });
+		await h.ready();
+		await h.page.waitForTimeout(500);
+	};
+	const name = (o) => (o.type === 15 ? (o.intent === "InkHighlight" ? "marker" : "pen") : { 9: "text highlight", 3: "text box", 4: o.lineEndings?.end || o.lineEndings?.start ? "arrow" : "line", 5: "rectangle", 13: "ellipse", 6: "ellipse" }[o.type] ?? `type ${o.type}`);
+	const compare = async (label) => {
+		const before = await snap();
+		await reopen();
+		const after = await snap();
+		for (const [id, b] of Object.entries(before)) {
+			const a = after[id];
+			if (!a) { h.check(`${label}: the ${name(b)} is still there`, false, id); continue; }
+			const diffs = FIELDS.filter((k) => !same(k, b[k], a[k])).map((k) => `${k} ${JSON.stringify(b[k])} -> ${JSON.stringify(a[k])}`);
+			h.check(`${label}: the ${name(b)} keeps its style`, diffs.length === 0, diffs.join("; ") || "ok");
+		}
+		return after;
+	};
+
+	// 1. New annotations drawn after every style setting has been changed away from its default.
+	await h.api(`(() => {
+		tools.setStyle("pen", { color: "#1971c2", width: 5, opacity: 0.7 });
+		tools.setStyle("marker", { color: "#e64980", width: 20, opacity: 0.35 });
+		tools.setStyle("textHighlight", { color: "#74c0fc", opacity: 0.6 });
+		tools.setStyle("text", { color: "#2f9e44", width: 20, opacity: 0.8 });
+		tools.setTextFormat({ font: "mono", bold: true, italic: false, align: "right" });
+		tools.setStyle("shape", { color: "#7048e8", width: 3, opacity: 0.9 });
+		tools.setShapeLine({ style: "dashed", start: "diamond", end: "closedArrow" });
+	})()`);
+	await h.tool("pen");
+	await h.stroke(...at(60, 420));
+	await h.tool("marker");
+	await h.stroke(...at(60, 470));
+	await h.tool("textHighlight");
+	await h.drag(...at(55, 138 + 28 * 2), ...at(250, 138 + 28 * 2), 8, 600);
+	await h.tool("text");
+	await h.page.mouse.click(...at(300, 420));
+	await h.page.waitForTimeout(300);
+	await h.page.keyboard.type("Alpha");
+	await h.tool("pointer");
+	await h.page.waitForTimeout(400);
+	const kinds = ["arrow", "line", "rectangle", "ellipse"];
+	for (let i = 0; i < kinds.length; i++) {
+		await h.api(`tools.setShapeKind(${JSON.stringify(kinds[i])})`);
+		await h.tool("shape");
+		await h.drag(...at(60 + i * 120, 560), ...at(150 + i * 120, 640));
+	}
+	await h.tool("pointer");
+	h.check("eight annotations are drawn", (await h.count()) === 8, await h.count());
+	const drawn = await compare("new");
+
+	// 2. The same annotations edited through their menus: colour, width (text size), opacity, bold/italic, line style.
+	const list = Object.values(drawn);
+	const ids = list.map((o) => ({ pageIndex: o.pageIndex, id: o.id }));
+	await h.api(`tools.recolorMany(${JSON.stringify(ids)}, "#f08c00")`);
+	await h.page.waitForTimeout(300);
+	for (const o of list) {
+		const width = o.type === 3 ? 28 : o.type === 9 ? undefined : (o.intent === "InkHighlight" ? 10 : 2);
+		await h.api(`tools.restyle(ann.getAnnotationById(${JSON.stringify(o.id)}).object, ${JSON.stringify(width === undefined ? { opacity: 0.45 } : { width })})`);
+		await h.page.waitForTimeout(150);
+		await h.api(`tools.restyle(ann.getAnnotationById(${JSON.stringify(o.id)}).object, { opacity: 0.45 })`);
+		await h.page.waitForTimeout(150);
+		if (o.type === 3) await h.api(`tools.formatTextBox(ann.getAnnotationById(${JSON.stringify(o.id)}).object, { bold: false, italic: true }, { font: "mono", bold: true, italic: false, align: "right" })`);
+		if (o.type === 4 || o.type === 5 || o.type === 6 || o.type === 13) await h.api(`tools.setAnnotationLineStyle(ann.getAnnotationById(${JSON.stringify(o.id)}).object, "dotted")`);
+		await h.page.waitForTimeout(150);
+	}
+	const edited = await compare("edited");
+	const flat = Object.values(edited);
+	h.check("the edits themselves took (orange, 45% opacity)", flat.every((o) => same("color", o.type === 3 ? o.fontColor : o.strokeColor ?? o.color, "#f08c00") && near(o.opacity ?? 1, 0.45, 0.01)), JSON.stringify(flat.map((o) => [name(o), o.fontColor ?? o.strokeColor ?? o.color, o.opacity])));
+
+	// 3. Edits undone before saving are saved as undone.
+	const one = flat.find((o) => o.type === 5);
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotationById(${JSON.stringify(one.id)}).object, "solid")`);
+	await h.page.waitForTimeout(150);
+	await h.api(`tools.restyle(ann.getAnnotationById(${JSON.stringify(one.id)}).object, { width: 6 })`);
+	await h.page.waitForTimeout(150);
+	await h.api(`tools.undo()`);
+	await h.page.waitForTimeout(150);
+	await h.api(`tools.undo()`);
+	await h.page.waitForTimeout(300);
+	await compare("undone");
+});
+
+
 (async () => {
 	let failed = false;
 	const only = process.argv[2];

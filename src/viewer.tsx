@@ -30,7 +30,7 @@ import { installInkSmoothing } from "./ink";
 import { PdfInkRenderers } from "./ink-preview";
 import { installAnnotationMemo } from "./memo-annotations";
 import { forgetStampSource, rememberStampSource } from "./stamp";
-import { FREETEXT, HIGHLIGHT, INK, LINE, SQUARE, CIRCLE, SHAPE_TOOL, ToolController, toolOfAnnotation } from "./tools";
+import { FREETEXT, HIGHLIGHT, INK, LINE, SQUARE, CIRCLE, SHAPE_TOOL, ToolController, isMarker, toolOfAnnotation } from "./tools";
 import { fontFormat, lineStyleOf } from "./formats";
 import { LineStyleGlyph, dotSize } from "./toolbar";
 import { LINE_STYLES } from "./settings";
@@ -443,8 +443,8 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 
 	/** Each kind of annotation takes its tool's palette (pen, highlighters, text, shapes); a mixed selection gets them all. */
 	const paletteFor = (objects: any[]): string[] => {
-		const pen = objects.some((o) => o?.type === INK && o.intent !== "InkHighlight");
-		const hl = objects.some((o) => o?.type === HIGHLIGHT || (o?.type === INK && o.intent === "InkHighlight"));
+		const pen = objects.some((o) => o?.type === INK && !isMarker(o));
+		const hl = objects.some((o) => o?.type === HIGHLIGHT || isMarker(o));
 		const text = objects.some((o) => o?.type === FREETEXT && o.intent !== "FreeTextCallout");
 		const shape = objects.some((o) => o?.type === LINE || o?.type === SQUARE || o?.type === CIRCLE);
 		return [...new Set([...(pen ? settings.penColors : []), ...(hl ? settings.highlightColors : []), ...(text ? settings.textColors : []), ...(shape ? settings.shapeColors : [])])];
