@@ -16,6 +16,13 @@
  *    events are stopped while it is on the page.
  *  - A stale DOM text selection would start a native drag on the next pen-down
  *    and swallow the stroke: dragstart is blocked.
+ *  - Text first with the pointer tool: EmbedPDF selects an annotation on
+ *    pointer-down, so text under a stroke or highlight could not be selected.
+ *    Unselected annotations are made transparent to the pointer (CSS, class
+ *    is-pointer), so a drag selects text (or draws a box) as if they were not
+ *    there; a tap that did not move is hit-tested against the annotations'
+ *    shapes afterwards and selects the one under it. Backlink boxes work the
+ *    same way: a drag selects the text inside, a tap opens the note.
  */
 import type { Settings } from "./settings";
 import type { ToolController } from "./tools";
@@ -35,6 +42,8 @@ const HIGHLIGHT = 9;
 const PEN_TOUCH_RADIUS = 48;
 /** Pen buttons that mean "erase": primary while hovering (S Pen), barrel (2) or eraser end (32). */
 const ERASER_BUTTONS = 1 | 2 | 32;
+/** How far (CSS px) a press may move and still count as a tap, by pointer type. */
+const TAP_SLOP: Record<string, number> = { mouse: 5, pen: 8, touch: 10 };
 
 function segmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
 	const dx = bx - ax, dy = by - ay;
@@ -63,6 +72,45 @@ export function annotationHit(a: any, x: number, y: number, radius: number): boo
 	return false;
 }
 
+const LINE = 4, SQUARE = 5, CIRCLE = 6, POLYGON = 7, POLYLINE = 8;
+
+const filled = (a: any) => !!a.color && a.color !== "transparent";
+
+/**
+ * Whether a tap at (x, y) page units lands on an annotation's shape, within
+ * `radius`: strokes and highlights as for the eraser, lines and polylines by
+ * their segments, hollow boxes and ellipses by their outline, anything else
+ * (text, images, filled shapes) by its rectangle.
+ */
+export function tapHit(a: any, x: number, y: number, radius: number): boolean {
+	if (a?.type === INK || a?.type === HIGHLIGHT) return annotationHit(a, x, y, radius);
+	const o = a?.rect?.origin, sz = a?.rect?.size;
+	if (!o || !sz) return false;
+	if (x < o.x - radius || x > o.x + sz.width + radius || y < o.y - radius || y > o.y + sz.height + radius) return false;
+	const r = radius + (a.strokeWidth ?? 1) / 2;
+	const near = (pts: { x: number; y: number }[], closed: boolean) => {
+		for (let i = 1; i < pts.length; i++) if (segmentDistance(x, y, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y) <= r) return true;
+		return closed && pts.length > 2 && segmentDistance(x, y, pts[pts.length - 1].x, pts[pts.length - 1].y, pts[0].x, pts[0].y) <= r;
+	};
+	if (a.type === LINE && a.linePoints?.start && a.linePoints?.end) return near([a.linePoints.start, a.linePoints.end], false);
+	if ((a.type === POLYLINE || a.type === POLYGON) && Array.isArray(a.vertices) && a.vertices.length) {
+		if (a.type === POLYGON && filled(a)) return true; // inside the rect is close enough for a filled polygon
+		return near(a.vertices, a.type === POLYGON);
+	}
+	if (a.type === SQUARE && !filled(a)) {
+		const inner = x > o.x + r && x < o.x + sz.width - r && y > o.y + r && y < o.y + sz.height - r;
+		return !inner;
+	}
+	if (a.type === CIRCLE) {
+		const rx = sz.width / 2, ry = sz.height / 2;
+		if (rx <= 0 || ry <= 0) return false;
+		const d = Math.hypot((x - o.x - rx) / rx, (y - o.y - ry) / ry);
+		if (filled(a)) return d <= 1 + r / Math.min(rx, ry);
+		return Math.abs(d - 1) * Math.min(rx, ry) <= r;
+	}
+	return true;
+}
+
 export class PointerGuard {
 	/** Whether the pen's side button was down on the last hover sample. */
 	private buttonHeld = false;
@@ -86,6 +134,8 @@ export class PointerGuard {
 	/** What the current eraser stroke has removed, recorded as one undo step when it ends. */
 	private erased: any[] = [];
 	private readonly win: Window;
+	/** A pointer-tool press that may still turn out to be a tap on an annotation. */
+	private tap: { id: number; x: number; y: number; slop: number } | null = null;
 
 	constructor(private readonly root: HTMLElement, private readonly tools: ToolController, private readonly settings: () => Settings, private readonly onErased: () => void) {
 		this.win = root.ownerDocument.defaultView ?? window;
@@ -139,6 +189,9 @@ export class PointerGuard {
 		this.root.classList.toggle("is-touch-draw", !this.tools.stylusMode && this.tools.penOnly);
 		// Hand tool: nothing on the page is clickable, so a drag over a stroke pans instead of selecting it.
 		this.root.classList.toggle("is-hand", this.tools.tool === "hand");
+		// Pointer tool: unselected annotations let presses through to the text; taps are hit-tested by the guard.
+		this.root.classList.toggle("is-pointer", this.tools.tool === "pointer");
+		if (this.tools.tool !== "pointer") this.tap = null;
 		if (!this.eraserActive()) this.cursor.hidden = true;
 	}
 
@@ -259,6 +312,7 @@ export class PointerGuard {
 			}
 			return;
 		}
+		this.noteTap(e);
 		const intercept = this.eraserActive() && this.viewportAt(e.clientX, e.clientY) !== null;
 		this.pens.set(e.pointerId, intercept);
 		if (e.pointerType === "pen") {
@@ -335,6 +389,7 @@ export class PointerGuard {
 			}
 			return;
 		}
+		if (this.tap?.id === e.pointerId && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > this.tap.slop) this.tap = null;
 		if (this.pens.has(e.pointerId) && e.buttons === 0) this.forget(e); // a release nobody saw
 		const down = this.pens.has(e.pointerId);
 		if (down && this.penAt?.id === e.pointerId) {
@@ -383,7 +438,15 @@ export class PointerGuard {
 			return;
 		}
 		const intercepted = this.pens.get(e.pointerId) ?? false;
-		const wasPen = e.pointerType === "pen" && this.pens.has(e.pointerId);
+		const tap = this.tap?.id === e.pointerId ? this.tap : null;
+		if (tap) {
+			this.tap = null;
+			if (e.type === "pointerup" && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) <= tap.slop) {
+				const { clientX, clientY, pointerType, ctrlKey, metaKey } = e;
+				// After EmbedPDF has handled the release (a tap on the page clears the selection first).
+				this.win.setTimeout(() => this.selectAt({ clientX, clientY, pointerType, ctrlKey, metaKey }), 0);
+			}
+		}
 		this.forget(e);
 		if (!intercepted) return;
 		e.stopPropagation();
@@ -403,6 +466,60 @@ export class PointerGuard {
 			if (Math.hypot(vx, vy) >= 0.5) this.win.requestAnimationFrame(step);
 		};
 		this.win.requestAnimationFrame(step);
+	}
+
+	// ----------------------------------------------------------- text first
+
+	/** Remembers a pointer-tool press on the page that may become a tap on an annotation. */
+	private noteTap(e: PointerEvent) {
+		this.tap = null;
+		if (this.tools.tool !== "pointer" || e.button !== 0 || !e.isPrimary) return;
+		const target = e.target as Element | null;
+		if (!target?.closest?.(".pdf-ink-page-layers")) return;
+		// Menus and a selected annotation's own move and resize handles keep their clicks.
+		if (target.closest("[data-no-interaction], .pdf-ink-menu, .pdf-ink-area")) return;
+		this.tap = { id: e.pointerId, x: e.clientX, y: e.clientY, slop: TAP_SLOP[e.pointerType] ?? 8 };
+	}
+
+	/**
+	 * Selects what is under a tap: a backlink box (drawn above annotations)
+	 * opens its note, otherwise the topmost annotation whose shape is within
+	 * the slop gets selected (Ctrl/Cmd adds to the selection, as in EmbedPDF).
+	 * Geometric, from the annotation data: switching EmbedPDF's hit areas
+	 * back on for a DOM hit test restyles every annotation on the page, which
+	 * took ~40 ms for 1,500 strokes. Returns whether something was hit.
+	 */
+	selectAt(p: { clientX: number; clientY: number; pointerType: string; ctrlKey: boolean; metaKey: boolean }): boolean {
+		if (this.tools.tool !== "pointer") return false;
+		const at = this.locate(p.clientX, p.clientY);
+		if (!at) return false;
+		const page = this.root.querySelector(`.pdf-ink-page[data-page-index="${at.pageIndex}"]`);
+		for (const box of Array.from(page?.querySelectorAll<HTMLElement>(".pdf-ink-backlink") ?? []).reverse()) {
+			const r = box.getBoundingClientRect();
+			if (p.clientX >= r.left && p.clientX <= r.right && p.clientY >= r.top && p.clientY <= r.bottom) {
+				box.click();
+				return true;
+			}
+		}
+		const scope = this.tools.annotations();
+		if (!scope) return false;
+		const radius = (TAP_SLOP[p.pointerType] ?? 8) / at.scale;
+		const all: any[] = scope.getAnnotations?.({ pageIndex: at.pageIndex }) ?? [];
+		let hit: any = null;
+		for (let i = all.length - 1; i >= 0 && !hit; i--) {
+			const o = all[i]?.object;
+			if (!o || (o.flags && (o.flags.includes?.("hidden") || o.flags.includes?.("noView")))) continue;
+			if (scope.isAnnotationInteractive && !scope.isAnnotationInteractive(o)) continue;
+			if (tapHit(o, at.x, at.y, radius)) hit = o;
+		}
+		if (!hit) return false;
+		// A reply (for example a link's popup) selects its parent, as EmbedPDF does.
+		const parent = hit.inReplyToId ? all.find((t) => t?.object?.id === hit.inReplyToId)?.object : null;
+		const target = parent ?? hit;
+		this.tools.registry?.getPlugin?.("selection")?.provides?.()?.forDocument?.(this.tools.documentId)?.clear?.();
+		if (p.ctrlKey || p.metaKey) scope.toggleSelection(target.pageIndex ?? at.pageIndex, target.id);
+		else scope.selectAnnotation(target.pageIndex ?? at.pageIndex, target.id);
+		return true;
 	}
 
 	// ------------------------------------------------------------------ eraser

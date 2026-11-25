@@ -236,6 +236,29 @@ const files = {
 	await page.waitForTimeout(500);
 	const hl = await api(`ann.getAnnotations().map((a) => [a.object.type, a.object.color, a.object.segmentRects?.length])`);
 	check("the selection menu's Highlight makes a text highlight in the text-highlighter colour", hl.length === 1 && hl[0][0] === 9 && hl[0][1] === "#ffe066" && hl[0][2] >= 1, JSON.stringify(hl));
+	// Text first: a drag over the highlight selects its text again; a tap on it selects the highlight.
+	const menuNow = () => page.evaluate(() => [...document.querySelectorAll(".pdf-ink-menu .pdf-ink-menu-item")].map((b) => b.textContent.trim()));
+	await page.mouse.click(textX1 + 300, textY + 400);
+	await page.waitForTimeout(200);
+	await drag(textX0 + 10, textY, textX1 - 10, textY, 8, 500);
+	const overHl = [await menuNow(), await api(`ann.getSelectedAnnotations().length`)];
+	check("pointer: a drag that starts on a highlight selects the text under it", overHl[0].includes("Copy text") && overHl[1] === 0, JSON.stringify(overHl));
+	await page.mouse.click(textX1 + 300, textY + 400);
+	await page.waitForTimeout(200);
+	// The backlink box from the fixture covers this text and is drawn above annotations (its tap wins): hide it for this check.
+	await page.evaluate(() => ((window.savedLinks = window.links), (window.links = []), window.view.handle.refreshBacklinks()));
+	await page.waitForTimeout(100);
+	await page.mouse.click((textX0 + textX1) / 2, textY);
+	await page.waitForTimeout(300);
+	await page.evaluate(() => ((window.links = window.savedLinks), window.view.handle.refreshBacklinks()));
+	const tapHl = await api(`ann.getSelectedAnnotations().map((a) => a.object.type)`);
+	check("pointer: a tap on a highlight selects the highlight", tapHl.length === 1 && tapHl[0] === 9, JSON.stringify(tapHl));
+	await page.mouse.click(textX1 + 300, textY + 400);
+	await page.waitForTimeout(200);
+	check("pointer: a tap beside it deselects", (await api(`ann.getSelectedAnnotations().length`)) === 0);
+	await page.mouse.click(r0.x + 250 * z, r0.y + 125 * z); // inside the backlink box, below the highlight
+	await page.waitForTimeout(200);
+	check("pointer: a tap on a backlink box still opens the note", (await page.evaluate(() => window.opened.length)) === 2, await page.evaluate(() => window.opened.length));
 	await api(`ann.deleteAllAnnotations()`);
 	await page.waitForTimeout(200);
 
@@ -292,6 +315,12 @@ const files = {
 
 	// --- pointer: tap selects, marquee multi-selects, delete
 	await tool("pointer");
+	// Text first: the strokes lie over text lines; a drag starting on one selects the text, not the stroke.
+	await drag(x + 40, y + 5, x + 200, y + 5, 10, 500);
+	const overInk = [await page.evaluate(() => [...document.querySelectorAll(".pdf-ink-menu .pdf-ink-menu-item")].map((b) => b.textContent.trim())), await api(`ann.getSelectedAnnotations().length`)];
+	check("pointer: a drag that starts on a stroke over text selects the text", overInk[0].includes("Copy text") && overInk[1] === 0, JSON.stringify(overInk));
+	await page.mouse.click(x - 200, y + 400);
+	await page.waitForTimeout(200);
 	await page.mouse.click(x + 40, y + 5);
 	await page.waitForTimeout(300);
 	const sel1 = await api(`ann.getSelectedAnnotations().length`);
@@ -302,6 +331,13 @@ const files = {
 	await page.waitForTimeout(200);
 	const recolored = await api(`ann.getSelectedAnnotations()[0]?.object.strokeColor`);
 	check("a swatch in the annotation menu recolours it", recolored === "#1971c2", recolored);
+	const yBefore = await api(`ann.getSelectedAnnotations()[0].object.rect.origin.y`);
+	await drag(x + 40, y + 5, x + 40, y + 65, 8, 400);
+	const moved = await api(`[ann.getSelectedAnnotations().length, ann.getSelectedAnnotations()[0]?.object.rect.origin.y]`);
+	check("pointer: dragging the selected stroke still moves it", moved[0] === 1 && moved[1] > yBefore + 20, JSON.stringify([yBefore, moved]));
+	await click('.pdf-ink-toolbar [aria-label="Undo"]');
+	await page.waitForTimeout(300);
+	check("undo puts it back", Math.abs((await api(`ann.getAnnotations().find((a) => a.object.strokeColor === "#1971c2")?.object.rect.origin.y`)) - yBefore) < 0.5);
 	await page.mouse.click(x - 200, y + 400);
 	await page.waitForTimeout(200);
 	const sel = [x - 20, y - 40, x + 320, y + 160];
@@ -358,6 +394,27 @@ const files = {
 	await page.waitForTimeout(500);
 	check("pointer + stylus mode off: two fingers do not pinch", Math.abs((await api(`zoom.getState().currentZoomLevel`)) - zp) < 0.01);
 	await click(".pdf-ink-stylus");
+	// A free-text annotation over text: a tap selects it, a double-click edits it, a drag from it selects text.
+	await api(`ann.deselectAnnotation()`);
+	await api(`ann.createAnnotation(0, { type: 3, id: "ft1", pageIndex: 0, rect: { origin: { x: 60, y: 480 }, size: { width: 160, height: 30 } }, contents: "Note", fontSize: 14, fontColor: "#000000", color: "transparent", opacity: 1 })`);
+	await page.waitForTimeout(400);
+	const ftX = r0.x + 120 * z, ftY = r0.y + 492 * z;
+	await drag(ftX, ftY, ftX + 150 * z, ftY, 8, 500);
+	const overFt = [await page.evaluate(() => [...document.querySelectorAll(".pdf-ink-menu .pdf-ink-menu-item")].map((b) => b.textContent.trim())), await api(`ann.getSelectedAnnotations().length`)];
+	check("pointer: a drag that starts on a text box selects the text under it", overFt[0].includes("Copy text") && overFt[1] === 0, JSON.stringify(overFt));
+	await page.mouse.click(x - 200, y + 400);
+	await page.waitForTimeout(200);
+	await page.mouse.click(ftX, ftY);
+	await page.waitForTimeout(300);
+	check("pointer: a tap on a text box selects it", (await api(`ann.getSelectedAnnotations().map((a) => a.object.id).join()`)) === "ft1");
+	await page.mouse.dblclick(ftX, ftY);
+	await page.waitForTimeout(300);
+	const editing = await page.evaluate(() => !!document.querySelector('.pdf-ink-page [contenteditable="true"]'));
+	check("pointer: a double-click on a text box edits its text", editing);
+	await page.mouse.click(x - 200, y + 400);
+	await page.waitForTimeout(300);
+	await api(`ann.deleteAnnotation(0, "ft1")`);
+	await page.waitForTimeout(200);
 	await page.waitForTimeout(100);
 	await api(`ann.deselectAnnotation()`);
 

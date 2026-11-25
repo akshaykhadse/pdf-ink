@@ -2,7 +2,7 @@
 import { smoothStroke } from "../src/ink";
 import { fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "../src/links";
 import { DEFAULT_SETTINGS, defaultSettings, normalizeSettings, parseColors, parseNumbers } from "../src/settings";
-import { annotationHit } from "../src/guard";
+import { annotationHit, tapHit } from "../src/guard";
 import { dotSize } from "../src/toolbar";
 
 let failed = false;
@@ -54,3 +54,11 @@ check("annotationHit ignores other types", !annotationHit({ type: 1, rect: { ori
 check("dotSize grows with width and stays within bounds", dotSize(0.25) >= 2 && dotSize(1) < dotSize(4) && dotSize(40) <= 10);
 
 if (failed) process.exit(1);
+
+// tapHit: what a pointer-tool tap selects
+const box = (x: number, y: number, w: number, h: number) => ({ origin: { x, y }, size: { width: w, height: h } });
+check("tapHit: a stroke by its path, as the eraser", tapHit(ink, 5, 2, 1.5) && !tapHit(ink, 5, 5, 1.5));
+check("tapHit: a line by its segment, not its whole box", tapHit({ type: 4, rect: box(0, 0, 10, 10), linePoints: { start: { x: 0, y: 0 }, end: { x: 10, y: 10 } }, strokeWidth: 1 }, 5, 5.5, 1) && !tapHit({ type: 4, rect: box(0, 0, 10, 10), linePoints: { start: { x: 0, y: 0 }, end: { x: 10, y: 10 } }, strokeWidth: 1 }, 9, 1, 1));
+check("tapHit: a hollow box by its outline, a filled one inside", tapHit({ type: 5, rect: box(0, 0, 20, 20), strokeWidth: 2 }, 0.5, 10, 1) && !tapHit({ type: 5, rect: box(0, 0, 20, 20), strokeWidth: 2 }, 10, 10, 1) && tapHit({ type: 5, rect: box(0, 0, 20, 20), color: "#ff0000" }, 10, 10, 1));
+check("tapHit: a hollow ellipse by its outline", tapHit({ type: 6, rect: box(0, 0, 20, 10), strokeWidth: 1 }, 10, 0.2, 1) && !tapHit({ type: 6, rect: box(0, 0, 20, 10), strokeWidth: 1 }, 10, 5, 1));
+check("tapHit: text and images by their box", tapHit({ type: 3, rect: box(0, 0, 20, 10) }, 10, 5, 1) && !tapHit({ type: 13, rect: box(0, 0, 20, 10) }, 30, 5, 1));
