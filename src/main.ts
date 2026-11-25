@@ -44,7 +44,8 @@ export default class PdfInkPlugin extends Plugin {
 
 		const withView = (fn: (view: PdfInkView) => void) => (checking: boolean) => {
 			const view = this.app.workspace.getActiveViewOfType(PdfInkView);
-			if (!view) return false;
+			// While a page is added or deleted, the open document is about to be replaced.
+			if (!view || view.editingPages) return false;
 			if (!checking) fn(view);
 			return true;
 		};
@@ -68,8 +69,9 @@ export default class PdfInkPlugin extends Plugin {
 			}),
 		});
 		const withTools = (fn: (tools: ToolController) => void) => (checking: boolean) => {
-			const tools = this.app.workspace.getActiveViewOfType(PdfInkView)?.tools;
-			if (!tools) return false;
+			const view = this.app.workspace.getActiveViewOfType(PdfInkView);
+			const tools = view?.tools;
+			if (!tools || view.editingPages) return false;
 			if (!checking) fn(tools);
 			return true;
 		};

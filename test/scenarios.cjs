@@ -227,7 +227,10 @@ scenario("add and delete pages", { pdf: "/mixed.pdf" }, async (h) => {
 	const items = await h.page.evaluate(() => [...document.querySelectorAll(".pdf-ink-popover .pdf-ink-menu-item")].map((b) => b.textContent.trim()));
 	h.check("the pages button offers add after, add before and delete", items.join("|") === "Add blank page after page 2|Add blank page before page 2|Delete page 2…", items.join("|"));
 	await h.page.evaluate(() => document.querySelectorAll(".pdf-ink-popover .pdf-ink-menu-item")[0].click());
+	await h.page.waitForTimeout(30);
+	h.check("keys leave the document alone while the page is added", (await h.page.evaluate(() => window.view.editingPages && window.view.scope.press("Mod+z") === false)) && (await h.count()) === 1);
 	await waitOpen();
+	h.check("the reader is told undo starts afresh", (await h.page.evaluate(() => window.notices.at(-1))).startsWith("Added a blank page 3."));
 	h.check("a blank page as big as page 2 follows it", (await sizes()) === "595x842,842x595,842x595,420x595", await sizes());
 	h.check("the new page is in view", (await h.api(`tools.state().page`)) === 3, await h.api(`tools.state().page`));
 	h.check("the file was written once, with the unsaved stroke in it", (await h.page.evaluate(() => window.saved.length)) === 1 && (await h.page.evaluate(() => new TextDecoder("latin1").decode(window.saved[0]).includes("/Ink"))));
@@ -271,6 +274,15 @@ scenario("add and delete pages", { pdf: "/mixed.pdf" }, async (h) => {
 	const n = await h.api(`tools.state().pages`);
 	await h.page.evaluate(() => window.view.requestPageEdit("delete"));
 	h.check("the last page cannot be deleted", n === 1 && (await h.page.evaluate(() => window.modals.length)) === 4 && (await h.api(`tools.state().pages`)) === 1, n);
+});
+
+scenario("a blank page beside a rotated page", { pdf: "/rotated.pdf" }, async (h) => {
+	await h.page.evaluate(() => window.view.requestPageEdit("insertAfter"));
+	await h.page.waitForTimeout(50);
+	for (let i = 0; i < 100 && (await h.page.evaluate(() => window.view.editingPages)); i++) await h.page.waitForTimeout(50);
+	await h.ready();
+	const pages = await h.api(`[0, 1, 2].map((i) => JSON.stringify(window.view.handle.pageSize(i))).join()`);
+	h.check("it takes the rotated page's size and /Rotate", pages === '{"width":595,"height":842,"rotation":1},{"width":595,"height":842,"rotation":1},{"width":595,"height":842,"rotation":0}', pages);
 });
 
 (async () => {

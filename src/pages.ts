@@ -9,18 +9,18 @@ import type { PdfDocumentObject, PdfEngine } from "@embedpdf/models";
 import { settle } from "./viewer";
 
 export type PageEdit =
-	/** A blank page of the given size (PDF points) becomes page index `at`. */
-	| { kind: "insert"; at: number; width: number; height: number }
+	/** A blank page of the given size (PDF points) and rotation (quarter turns) becomes page index `at`. */
+	| { kind: "insert"; at: number; width: number; height: number; rotation: number }
 	/** Page index `index` is removed with everything on it. */
 	| { kind: "delete"; index: number };
 
-/** A one-page PDF with an empty page of the given size, written by hand. */
-export function blankPagePdf(width: number, height: number): Uint8Array {
+/** A one-page PDF with an empty page of the given size and /Rotate (quarter turns), written by hand. */
+export function blankPagePdf(width: number, height: number, rotation = 0): Uint8Array {
 	const n = (v: number) => (Math.round(v * 100) / 100).toString();
 	const objs = [
 		"<< /Type /Catalog /Pages 2 0 R >>",
 		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-		`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n(width)} ${n(height)}] /Resources << >> /Contents 4 0 R >>`,
+		`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n(width)} ${n(height)}]${rotation % 4 ? ` /Rotate ${(rotation % 4) * 90}` : ""} /Resources << >> /Contents 4 0 R >>`,
 		"<< /Length 0 >>\nstream\n\nendstream",
 	];
 	let pdf = "%PDF-1.4\n";
@@ -52,7 +52,7 @@ export async function editPdfPages(engine: PdfEngine, bytes: ArrayBuffer, edit: 
 			if (edit.index < 0 || edit.index >= doc.pageCount) throw new Error(`there is no page ${edit.index + 1}`);
 			await settle(engine.deletePage(doc, edit.index) as any);
 		} else {
-			const blank = await open(blankPagePdf(edit.width, edit.height).buffer as ArrayBuffer);
+			const blank = await open(blankPagePdf(edit.width, edit.height, edit.rotation).buffer as ArrayBuffer);
 			await settle(engine.importPages(doc, blank, [0], Math.max(0, Math.min(doc.pageCount, edit.at))) as any);
 		}
 		return await settle<ArrayBuffer>(engine.saveAsCopy(doc) as any);

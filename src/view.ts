@@ -41,6 +41,7 @@ export class PdfInkView extends FileView {
 		});
 		// Undo, redo and delete, unless a text box or an input has the keys.
 		const key = (fn: () => void) => () => {
+			if (this.editingPages) return false;
 			const el: any = this.containerEl.ownerDocument.activeElement;
 			if (el?.isContentEditable || el?.tagName === "INPUT" || el?.tagName === "TEXTAREA") return true;
 			if (!this.handle) return true;
@@ -298,7 +299,8 @@ export class PdfInkView extends FileView {
 		void this.editPages({ kind: "insert", at: action === "insertAfter" ? page : page - 1, ...size });
 	}
 
-	private editingPages = false;
+	/** True while a page is added or deleted: commands and keys leave the document alone. */
+	editingPages = false;
 
 	/**
 	 * Saves the PDF with the page added or removed and reopens it at that page.
@@ -321,7 +323,8 @@ export class PdfInkView extends FileView {
 			let result: { bytes: ArrayBuffer; position: ReadingPosition; zoom: unknown } | null = null;
 			const work = (this.saving = (async () => {
 				try {
-					const [engine, current] = await Promise.all([this.plugin.getEngine(), handle.save()]);
+					// Nothing unsaved: the file on disk is the document, and reading it is quicker than exporting.
+					const [engine, current] = await Promise.all([this.plugin.getEngine(), this.dirty ? handle.save() : this.app.vault.readBinary(file)]);
 					const bytes = await editPdfPages(engine, current, edit);
 					if (handle !== this.handle || file !== this.file) return false;
 					this.ignoreModifyUntil = Date.now() + 2000;
@@ -345,6 +348,7 @@ export class PdfInkView extends FileView {
 			if (!result) return false;
 			const done: { bytes: ArrayBuffer; position: ReadingPosition; zoom: unknown } = result;
 			await this.loadPdf(file, done);
+			new Notice(`${edit.kind === "insert" ? `Added a blank page ${done.position.page}` : `Deleted page ${edit.index + 1}`}. Undo starts afresh; links to later pages are now one page off.`, 6000);
 			return true;
 		} finally {
 			this.editingPages = false;

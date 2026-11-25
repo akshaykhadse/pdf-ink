@@ -58,7 +58,7 @@ function makePdf(pages, inks = 0, sizes = []) {
 			annots.push(add(`<< /Type /Annot /Subtype /Ink /Rect [${x0 - 1} ${y0 - 4} ${x0 + 17} ${y0 + 4}] /InkList [[${pts}]] /C [0.1 0.1 0.1] /BS << /W 1 >> /F 4 /NM (ink${n}) >>`));
 		}
 		const annotRef = annots.length ? ` /Annots [${annots.map((a) => `${a} 0 R`).join(" ")}]` : "";
-		kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${(sizes[i] ?? [595, 842]).join(" ")}] /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${content} 0 R${annotRef} >>`));
+		kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${(sizes[i] ?? [595, 842]).slice(0, 2).join(" ")}]${sizes[i]?.[2] ? ` /Rotate ${sizes[i][2]}` : ""} /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${content} 0 R${annotRef} >>`));
 	}
 	objs[1] = `<< /Type /Pages /Count ${pages} /Kids [${kids.map((k) => `${k} 0 R`).join(" ")}] >>`;
 	let pdf = "%PDF-1.4\n";
@@ -74,6 +74,7 @@ function makePdf(pages, inks = 0, sizes = []) {
 fs.writeFileSync(path.join(out, "sample.pdf"), makePdf(3));
 fs.writeFileSync(path.join(out, "long.pdf"), makePdf(30));
 fs.writeFileSync(path.join(out, "mixed.pdf"), makePdf(3, 0, [[595, 842], [842, 595], [420, 595]]));
+fs.writeFileSync(path.join(out, "rotated.pdf"), makePdf(2, 0, [[595, 842, 90], [595, 842]]));
 fs.writeFileSync(path.join(out, "dense.pdf"), makePdf(3, Number(process.env.PDF_INK_PERF_STROKES || 1500)));
 
 const html = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"><style>html,body{margin:0;height:100%;--background-secondary:#eee;--background-primary:#fff;--background-primary-alt:#ddd;--text-muted:#555;--text-normal:#111;--background-modifier-border:#ccc;--background-modifier-hover:#ddd;--interactive-accent:#36f;--radius-s:4px;--font-ui-small:12px}#leaf{width:1200px;height:1300px;position:relative}.view-content{height:100%}</style></head><body><div id="leaf" class="workspace-leaf-content"><div id="content" class="view-content"></div></div><script src="/harness.js"></script></body></html>`;
@@ -83,6 +84,7 @@ const files = {
 	"/sample.pdf": [path.join(out, "sample.pdf"), "application/pdf"],
 	"/long.pdf": [path.join(out, "long.pdf"), "application/pdf"],
 	"/mixed.pdf": [path.join(out, "mixed.pdf"), "application/pdf"],
+	"/rotated.pdf": [path.join(out, "rotated.pdf"), "application/pdf"],
 	"/dense.pdf": [path.join(out, "dense.pdf"), "application/pdf"],
 	"/pdfium.wasm": [path.join(root, "pdfium.wasm"), "application/wasm"],
 };

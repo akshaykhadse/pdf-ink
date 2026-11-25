@@ -85,8 +85,8 @@ export interface ViewerHandle {
 	position(): ReadingPosition | null;
 	/** Scrolls back to a remembered position without animation. */
 	restore(pos: ReadingPosition): void;
-	/** Size of a page (0-based) in PDF points, as it is shown. */
-	pageSize(pageIndex: number): { width: number; height: number } | null;
+	/** Size of a page (0-based) in PDF points before its /Rotate, and that rotation in quarter turns. */
+	pageSize(pageIndex: number): { width: number; height: number; rotation: number } | null;
 	/** The zoom as set by the reader: a mode such as "fit-width", or a number. */
 	zoomLevel(): unknown;
 	setZoomLevel(level: unknown): void;
@@ -333,8 +333,8 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 			},
 			position: () => position(),
 			pageSize: (i) => {
-				const size = pagesRef.current[i]?.size;
-				return size ? { width: size.width, height: size.height } : null;
+				const page: any = pagesRef.current[i];
+				return page?.size ? { width: page.size.width, height: page.size.height, rotation: page.rotation ?? 0 } : null;
 			},
 			zoomLevel: () => zoomScope?.getState?.()?.zoomLevel,
 			setZoomLevel: (level) => level !== undefined && zoomScope?.requestZoom?.(level),
