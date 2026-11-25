@@ -367,7 +367,8 @@ const { start, tinyPng, out, root } = require("./lib.cjs");
 	const reopened = await stampPixel();
 	check("after reopening, the engine draws the saved image", Array.isArray(reopened) && reopened[0] > 150 && reopened[1] < 80 && (await count()) === 6, `${JSON.stringify(reopened)}, ${await count()} annotations`);
 	await api(`(() => { const o = ann.getAnnotations().find((a) => a.object.type === 13).object; ann.deleteAnnotation(o.pageIndex, o.id); })()`);
-	await page.waitForTimeout(200);
+	// The delete lands asynchronously; a fixed wait was too short on a slow CI runner.
+	for (let i = 0; i < 30 && (await count()) !== 5; i++) await page.waitForTimeout(100);
 	check("deleting the reopened image leaves the five earlier annotations", (await count()) === 5, await count());
 
 	// --- eraser
