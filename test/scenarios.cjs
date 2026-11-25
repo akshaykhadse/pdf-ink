@@ -285,6 +285,57 @@ scenario("a blank page beside a rotated page", { pdf: "/rotated.pdf" }, async (h
 	h.check("it takes the rotated page's size and /Rotate", pages === '{"width":595,"height":842,"rotation":1},{"width":595,"height":842,"rotation":1},{"width":595,"height":842,"rotation":0}', pages);
 });
 
+scenario("a shape's line style, width and ends changed after drawing are saved", { shapeKind: "rectangle", shapeLine: { style: "solid", start: "none", end: "openArrow" } }, async (h) => {
+	const r = await h.pageRect(0);
+	const reopen = async () => {
+		await h.page.evaluate(async () => { await window.view.saveNow(true); await window.view.onUnloadFile(window.file); await window.view.onLoadFile(window.file); });
+		await h.ready();
+		await h.page.waitForTimeout(300);
+	};
+	await h.tool("shape");
+	await h.drag(r.x + 100, r.y + 100, r.x + 220, r.y + 200);
+	await reopen();
+	const rect = (await objs(h)).find((o) => o.type === 5);
+	h.check("a solid rectangle is drawn and saved", rect && rect.strokeStyle === 1, JSON.stringify(rect && [rect.strokeStyle, rect.strokeDashArray]));
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 5), "dotted")`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const dotted = (await objs(h)).find((o) => o.type === 5);
+	h.check("after reopening, the rectangle is dotted", dotted && dotted.strokeStyle === 2 && dotted.strokeDashArray?.length === 2, JSON.stringify(dotted && [dotted.strokeStyle, dotted.strokeDashArray]));
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 5), "dashed")`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const dashed = (await objs(h)).find((o) => o.type === 5);
+	h.check("after reopening, the rectangle is dashed", dashed && dashed.strokeStyle === 2 && dashed.strokeDashArray?.[0] === 3 * Math.max(1, dashed.strokeWidth), JSON.stringify(dashed && [dashed.strokeStyle, dashed.strokeDashArray, dashed.strokeWidth]));
+	await h.api(`tools.restyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 5), { width: 4 })`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const wide = (await objs(h)).find((o) => o.type === 5);
+	h.check("a new width is saved and the dashes scale with it", wide && wide.strokeWidth === 4 && wide.strokeStyle === 2 && wide.strokeDashArray?.[0] === 12, JSON.stringify(wide && [wide.strokeStyle, wide.strokeDashArray, wide.strokeWidth]));
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 5), "solid")`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const solid = (await objs(h)).find((o) => o.type === 5);
+	h.check("after reopening, the rectangle is solid again", solid && solid.strokeStyle === 1 && !solid.strokeDashArray?.length, JSON.stringify(solid && [solid.strokeStyle, solid.strokeDashArray]));
+	await h.api(`tools.restyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 5), { width: 2 })`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const thin = (await objs(h)).find((o) => o.type === 5);
+	h.check("a solid rectangle stays solid when its width changes", thin && thin.strokeWidth === 2 && thin.strokeStyle === 1, JSON.stringify(thin && [thin.strokeStyle, thin.strokeDashArray, thin.strokeWidth]));
+	// Arrows and lines share the border code: an arrow made dotted then solid stays solid.
+	await h.api(`tools.setShapeKind("arrow")`);
+	await h.tool("shape");
+	await h.drag(r.x + 100, r.y + 300, r.x + 260, r.y + 340);
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 4), "dotted")`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	await h.api(`tools.setAnnotationLineStyle(ann.getAnnotations().map((t) => t.object).find((o) => o.type === 4), "solid")`);
+	await h.page.waitForTimeout(300);
+	await reopen();
+	const arrow = (await objs(h)).find((o) => o.type === 4);
+	h.check("an arrow made dotted and then solid is solid after reopening, with its ends", arrow && arrow.strokeStyle === 1 && arrow.lineEndings?.end === 4, JSON.stringify(arrow && [arrow.strokeStyle, arrow.strokeDashArray, arrow.lineEndings]));
+});
+
 (async () => {
 	let failed = false;
 	const only = process.argv[2];

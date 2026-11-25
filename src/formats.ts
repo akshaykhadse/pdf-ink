@@ -41,12 +41,17 @@ export function lineEndOf(value: number | undefined): LineEnd {
 /** PdfAnnotationBorderStyle SOLID = 1, DASHED = 2 */
 const SOLID = 1, DASHED = 2;
 
-/** Border style and dash pattern for a line style; dashes scale with the line width. */
-export function strokePattern(style: LineStyle, width: number): { strokeStyle: number; strokeDashArray?: number[] } {
+/**
+ * Border style and dash pattern for a line style; dashes scale with the line width.
+ * Solid clears the pattern: an update merges into the annotation, so a dash array left
+ * from an earlier dashed or dotted style would be written again, and PDFium saves a
+ * border with a dash pattern as dashed (the change showed but was lost on reopen).
+ */
+export function strokePattern(style: LineStyle, width: number): { strokeStyle: number; strokeDashArray: number[] } {
 	const m = Math.max(1, width);
 	if (style === "dashed") return { strokeStyle: DASHED, strokeDashArray: [3 * m, 2 * m] };
 	if (style === "dotted") return { strokeStyle: DASHED, strokeDashArray: [m, 2 * m] };
-	return { strokeStyle: SOLID };
+	return { strokeStyle: SOLID, strokeDashArray: [] };
 }
 
 /** The line style an annotation's border reads as (dots: dash no longer than the width). */
