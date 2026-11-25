@@ -711,6 +711,192 @@ const files = {
 	const strokeLine = log.find((l) => l.n === 1);
 	check("the pen timing log writes a session line and one line per stroke", log[0]?.session && strokeLine && strokeLine.moves > 0 && typeof strokeLine.downFrame === "number" && typeof strokeLine.firstMoveDt === "number", JSON.stringify(log).slice(0, 300));
 	await page.evaluate(() => (window.settings.penTimingLog = false));
+
+	// --- text, arrow and shapes (EmbedPDF's native freeText, lineArrow, line, square and circle tools) on a fresh copy
+	await page.evaluate(() => window.run("/sample.pdf"));
+	await ready();
+	await page.waitForTimeout(300);
+	const p0 = await pageRect(0);
+	const zz = p0.width / 595;
+	const at = (px, py) => [p0.x + px * zz, p0.y + py * zz];
+	const objs = () => api(`ann.getAnnotations().map((a) => a.object)`);
+	await tool("text");
+	check("the text tool activates EmbedPDF's free text tool", (await api(`ann.getActiveTool()?.id`)) === "freeText");
+	await page.mouse.click(...at(120, 300));
+	await page.waitForTimeout(300);
+	const typing = await page.evaluate(() => !!document.activeElement?.isContentEditable);
+	check("a tap with the text tool adds a text box and starts typing in it, placeholder selected", typing && (await page.evaluate(() => getSelection().toString())) === "Text" && (await count()) === 1, `editing ${typing}, ${await count()} annotations`);
+	const typed = "Hello from PDF Ink, a longer line that needs a wider box";
+	await page.keyboard.type(typed);
+	// A tap inside the box being typed in moves the caret rather than starting a new box (plugin addition).
+	await page.mouse.click(...at(70, 300));
+	await page.waitForTimeout(200);
+	check("a tap inside the box being typed in keeps typing there", (await count()) === 1 && (await page.evaluate(() => document.activeElement?.isContentEditable)), await count());
+	// A real tap on another tool ends typing (EmbedPDF writes the text on blur).
+	await page.click('.pdf-ink-toolbar [data-tool="pointer"]');
+	await page.waitForTimeout(400);
+	const ft = (await objs()).find((o) => o.type === 3);
+	check("the typed text is kept in the tool's colour and size", ft && ft.contents === typed && ft.fontColor === "#e03131" && ft.fontSize === 14, JSON.stringify(ft && [ft.contents, ft.fontColor, ft.fontSize]));
+	check("the text box grows to fit its text (plugin addition)", ft && ft.rect.size.width > 300, JSON.stringify(ft?.rect));
+	const shownText = await page.evaluate(() => [...document.querySelectorAll(".pdf-ink-page span")].filter((e) => e.textContent.includes("Hello from")).map((e) => e.innerText));
+	check("the typed text shows once", shownText.length === 1 && shownText[0].trim() === typed, JSON.stringify(shownText));
+	await tool("text");
+	await page.mouse.click(...at(120, 500));
+	await page.waitForTimeout(300);
+	await page.click('.pdf-ink-toolbar [data-tool="hand"]');
+	await page.waitForTimeout(400);
+	check("a text box left empty is removed when typing ends", (await count()) === 1, await count());
+	// Text options: colour and size apply to the next box.
+	await tool("text");
+	await click('.pdf-ink-toolbar [aria-label="Tool options"]');
+	await page.waitForTimeout(100);
+	await click('.pdf-ink-popover [aria-label="Text size 24"]');
+	await click('.pdf-ink-popover [aria-label="Colour #1971c2"]');
+	await page.mouse.click(...at(300, 120));
+	await page.waitForTimeout(300);
+	await page.keyboard.type("Big");
+	await page.click('.pdf-ink-toolbar [data-tool="pointer"]');
+	await page.waitForTimeout(400);
+	const big = (await objs()).find((o) => o.type === 3 && o.contents === "Big");
+	check("text size and colour come from the tool options", big && big.fontSize === 24 && big.fontColor === "#1971c2" && big.rect.size.height >= 24, JSON.stringify(big && [big.fontSize, big.fontColor, big.rect]));
+
+	await tool("shape");
+	check("the shape tool starts as an arrow (EmbedPDF's lineArrow tool)", (await api(`ann.getActiveTool()?.id`)) === "lineArrow");
+	await page.mouse.click(...at(400, 600));
+	await page.waitForTimeout(300);
+	check("a tap with the shape tool draws nothing", (await count()) === 2, await count());
+	await drag(...at(100, 560), ...at(250, 600));
+	const arrow = (await objs()).find((o) => o.type === 4);
+	check("a drag draws an arrow in the shape colour and width", arrow && arrow.intent === "LineArrow" && arrow.strokeColor === "#e03131" && arrow.strokeWidth === 2 && Math.abs(arrow.linePoints.end.x - 250) < 3 && arrow.lineEndings?.end && arrow.lineEndings.end !== 0, JSON.stringify(arrow && [arrow.intent, arrow.strokeColor, arrow.strokeWidth, arrow.linePoints, arrow.lineEndings]));
+	const kind = async (k) => {
+		await tool("shape");
+		if (!(await page.$(".pdf-ink-popover .pdf-ink-shapes"))) await click('.pdf-ink-toolbar [aria-label="Tool options"]');
+		await page.waitForTimeout(80);
+		await click(`.pdf-ink-popover [data-shape="${k}"]`);
+		await page.waitForTimeout(80);
+	};
+	await kind("rectangle");
+	check("choosing rectangle switches to EmbedPDF's square tool and remembers it", (await api(`ann.getActiveTool()?.id`)) === "square" && (await page.evaluate(() => window.settings.shapeKind)) === "rectangle");
+	await click('.pdf-ink-popover [aria-label="Width 4"]');
+	await click('.pdf-ink-popover [aria-label="Colour #2f9e44"]');
+	await drag(...at(300, 400), ...at(450, 500));
+	const rectA = (await objs()).find((o) => o.type === 5);
+	check("a drag draws an unfilled rectangle in the chosen colour and width", rectA && rectA.strokeColor === "#2f9e44" && rectA.strokeWidth === 4 && (rectA.color === "transparent" || !rectA.color) && rectA.rect.size.width > 140, JSON.stringify(rectA && [rectA.strokeColor, rectA.strokeWidth, rectA.color, rectA.rect]));
+	await kind("ellipse");
+	await drag(...at(60, 330), ...at(160, 400));
+	await kind("line");
+	await drag(...at(300, 540), ...at(450, 590));
+	const types = (await objs()).map((o) => o.type + (o.intent ? ":" + o.intent : "")).sort();
+	check("ellipse and line draw circle and plain line annotations", types.join() === ["3", "3", "4", "4:LineArrow", "5", "6"].sort().join(), types.join());
+	check("the toolbar shape button shows the chosen shape", (await page.evaluate(() => document.querySelector('.pdf-ink-toolbar [data-tool="shape"]').innerHTML)).length > 0);
+
+	// The eraser takes shapes by their outline and text boxes anywhere.
+	await tool("eraser");
+	await drag(...at(375, 440), ...at(380, 460), 4);
+	check("the eraser leaves a rectangle alone when it only crosses the inside", (await objs()).some((o) => o.type === 5), (await objs()).map((o) => o.type).join());
+	await drag(...at(375, 380), ...at(375, 420), 6);
+	check("the eraser removes a rectangle when it crosses the outline", !(await objs()).some((o) => o.type === 5), (await objs()).map((o) => o.type).join());
+	await drag(...at(110, 320), ...at(110, 342), 6);
+	check("the eraser removes an ellipse when it crosses the outline", !(await objs()).some((o) => o.type === 6), (await objs()).map((o) => o.type).join());
+	await drag(...at(175, 565), ...at(175, 595), 6);
+	check("the eraser removes an arrow it crosses", !(await objs()).some((o) => o.intent === "LineArrow"), (await objs()).map((o) => o.type).join());
+	await drag(...at(310, 115), ...at(320, 135), 4);
+	check("the eraser removes a text box it touches", !(await objs()).some((o) => o.contents === "Big"), (await objs()).map((o) => o.type).join());
+	await click('.pdf-ink-toolbar [aria-label="Undo"]');
+	await page.waitForTimeout(300);
+	check("undo brings the erased text box back", (await objs()).some((o) => o.contents === "Big"));
+
+	// Recolour a selected text box from its menu (pen colours stay for strokes; text gets the text palette).
+	await tool("pointer");
+	const ftNow = (await objs()).find((o) => o.contents === typed);
+	await page.mouse.click(...at(ftNow.rect.origin.x + 20, ftNow.rect.origin.y + 8));
+	await page.waitForTimeout(300);
+	const selTypes = await api(`ann.getSelectedAnnotations().map((a) => a.object.type)`);
+	const sw = await page.$('.pdf-ink-float [aria-label="#2f9e44"]');
+	if (sw) await sw.click();
+	await page.waitForTimeout(300);
+	const recol = (await objs()).find((o) => o.contents === typed);
+	check("a selected text box is recoloured from its menu (font colour)", selTypes.join() === "3" && sw && recol.fontColor === "#2f9e44", JSON.stringify([selTypes, !!sw, recol?.fontColor]));
+
+	// --- text formats and line styles (native: standard fonts, alignment, border dash pattern, line endings)
+	await tool("text");
+	await click('.pdf-ink-toolbar [aria-label="Tool options"]');
+	await page.waitForTimeout(80);
+	await click('.pdf-ink-popover [data-font="serif"]');
+	await click('.pdf-ink-popover [aria-label="Bold"]');
+	await click('.pdf-ink-popover [aria-label="Italic"]');
+	await click('.pdf-ink-popover [aria-label="Align center"]');
+	await page.mouse.click(...at(400, 220));
+	await page.waitForTimeout(300);
+	await page.keyboard.type("Fmt");
+	await page.click('.pdf-ink-toolbar [data-tool="pointer"]');
+	await page.waitForTimeout(400);
+	const fmt = (await objs()).find((o) => o.contents === "Fmt");
+	check("text takes the chosen font, bold, italic and alignment (Times Bold Italic, centred)", fmt && fmt.fontFamily === 10 && fmt.textAlign === 1, JSON.stringify(fmt && [fmt.fontFamily, fmt.textAlign]));
+	const fmtStyle = await page.evaluate(() => { const e = [...document.querySelectorAll(".pdf-ink-page span")].find((x) => x.textContent === "Fmt"); return e && [getComputedStyle(e).fontWeight, getComputedStyle(e).fontStyle]; });
+	check("the text box shows bold italic on the page", fmtStyle && Number(fmtStyle[0]) >= 600 && fmtStyle[1] === "italic", JSON.stringify(fmtStyle));
+	await page.mouse.click(...at(fmt.rect.origin.x + fmt.rect.size.width / 2, fmt.rect.origin.y + fmt.rect.size.height / 2));
+	await page.waitForTimeout(300);
+	const boldBtn = await page.$('.pdf-ink-float [aria-label="Bold"]');
+	if (boldBtn) await boldBtn.click();
+	await page.waitForTimeout(300);
+	const unbolded = (await objs()).find((o) => o.contents === "Fmt");
+	check("a selected text box's menu toggles bold (Times Italic now)", boldBtn && unbolded.fontFamily === 11, JSON.stringify([!!boldBtn, unbolded?.fontFamily]));
+	await kind("arrow");
+	await click('.pdf-ink-popover [data-line-style="dashed"]');
+	await click('.pdf-ink-popover [data-side="start"] [data-end="closedArrow"]');
+	await click('.pdf-ink-popover [data-side="end"] [data-end="circle"]');
+	await drag(...at(80, 470), ...at(250, 520));
+	const darrow = (await objs()).find((o) => o.type === 4 && o.strokeStyle === 2);
+	check("an arrow takes the chosen dashes and ends", darrow && darrow.strokeDashArray?.[0] === 3 * darrow.strokeWidth && darrow.lineEndings?.start === 5 && darrow.lineEndings?.end === 2, JSON.stringify(darrow && [darrow.strokeStyle, darrow.strokeDashArray, darrow.strokeWidth, darrow.lineEndings]));
+	await kind("rectangle");
+	await click('.pdf-ink-popover [data-line-style="dotted"]');
+	check("arrow end choices show only for arrows", (await page.$('.pdf-ink-popover [data-side="start"]')) === null);
+	await drag(...at(300, 420), ...at(420, 500));
+	const drect = (await objs()).find((o) => o.type === 5);
+	check("a rectangle takes the dotted style", drect && drect.strokeStyle === 2 && drect.strokeDashArray?.[0] === Math.max(1, drect.strokeWidth), JSON.stringify(drect && [drect.strokeStyle, drect.strokeDashArray, drect.strokeWidth]));
+	await tool("pointer");
+	await page.mouse.click(...at(300, 460));
+	await page.waitForTimeout(300);
+	const solidBtn = await page.$('.pdf-ink-float [aria-label="Solid line"]');
+	if (solidBtn) await solidBtn.click();
+	await page.waitForTimeout(300);
+	const srect = (await objs()).find((o) => o.type === 5);
+	check("a selected shape's menu switches it back to a solid line", solidBtn && srect.strokeStyle === 1, JSON.stringify([!!solidBtn, srect?.strokeStyle]));
+	await click('.pdf-ink-toolbar [aria-label="Undo"]');
+	await page.waitForTimeout(300);
+	check("undo brings the dotted line back", (await objs()).find((o) => o.type === 5)?.strokeStyle === 2);
+	const savedFmt = await page.evaluate(async () => {
+		await window.view.saveNow(true);
+		const txt = new TextDecoder("latin1").decode(window.saved[window.saved.length - 1]);
+		return [/Times-Italic/.test(txt), /\/D\s*\[/.test(txt), /\/LE\s*\[\s*\/ClosedArrow\s*\/Circle/.test(txt)];
+	});
+	check("font, dash pattern and line ends are written into the PDF", savedFmt.every(Boolean), JSON.stringify(savedFmt));
+	await page.evaluate(async () => {
+		await window.view.onUnloadFile(window.file);
+		await window.view.onLoadFile(window.file);
+	});
+	await ready();
+	const reFmt = await objs();
+	const ra = reFmt.find((o) => o.type === 4 && o.strokeStyle === 2), rt = reFmt.find((o) => o.contents === "Fmt");
+	await page.waitForTimeout(300);
+	check("restoring the font on load does not mark the file changed", (await page.evaluate(() => window.view.dirty)) === false);
+	check("they load back the same", ra && ra.lineEndings?.start === 5 && ra.lineEndings?.end === 2 && rt && rt.fontFamily === 11 && rt.textAlign === 1, JSON.stringify([ra && [ra.strokeDashArray, ra.lineEndings], rt && [rt.fontFamily, rt.textAlign]]));
+	const savedShapes = await page.evaluate(async () => {
+		const ok = await window.view.saveNow(true);
+		const txt = new TextDecoder("latin1").decode(window.saved[window.saved.length - 1]);
+		return [ok, (txt.match(/\/FreeText/g) || []).length, (txt.match(/\/Subtype\s*\/Line/g) || []).length];
+	});
+	check("text boxes and lines are written into the PDF", savedShapes[0] === true && savedShapes[1] >= 2 && savedShapes[2] >= 1, JSON.stringify(savedShapes));
+	const shapesBefore = (await objs()).length;
+	await page.evaluate(async () => {
+		await window.view.onUnloadFile(window.file);
+		await window.view.onLoadFile(window.file);
+	});
+	await ready();
+	const back = await objs();
+	check("the text and line load back from the saved PDF", back.length === shapesBefore && back.some((o) => o.type === 3 && o.contents === typed), `${back.length} of ${shapesBefore}: ${back.map((o) => o.type + ":" + (o.contents ?? "")).join("; ")}`);
+	await page.screenshot({ path: path.join(out, "shapes.png") });
 	await browser.close();
 	if (failed) process.exit(1);
 })().catch((e) => {

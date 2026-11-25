@@ -30,7 +30,11 @@ import { installInkSmoothing } from "./ink";
 import { PdfInkRenderers } from "./ink-preview";
 import { installAnnotationMemo } from "./memo-annotations";
 import { forgetStampSource, rememberStampSource } from "./stamp";
-import { ToolController } from "./tools";
+import { FREETEXT, LINE, SQUARE, CIRCLE, SHAPE_TOOL, ToolController } from "./tools";
+import { fontFormat, lineStyleOf } from "./formats";
+import { LineStyleGlyph } from "./toolbar";
+import { LINE_STYLES } from "./settings";
+import { TEXT_BOX_WIDTH, TEXT_PLACEHOLDER, fitTextBox, keepTapsInTextBox, textLineHeight } from "./text-box";
 import { Backlink, LinkVars, PageRect, fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "./links";
 import { Icon } from "./icon";
 
@@ -136,6 +140,20 @@ function App(props: ViewerProps) {
 					{ id: "highlight", defaults: { strokeColor: s.textHighlight.color, color: s.textHighlight.color, opacity: s.textHighlight.opacity }, interaction: { exclusive: true } },
 					// stamp (image): a tap opens the file picker and drops the picture there; exclusive so a tap on an existing annotation inserts rather than selects.
 					{ id: "stamp", interaction: { exclusive: true } },
+					// freeText: a tap adds a box with its placeholder selected, so typing replaces it (a drag sets the box); a box left empty or untouched is removed when typing ends.
+					{
+						id: "freeText",
+						defaults: { fontColor: s.text.color, fontSize: s.text.width, opacity: s.text.opacity, color: "transparent", backgroundColor: "transparent", contents: TEXT_PLACEHOLDER },
+						clickBehavior: { enabled: true, defaultSize: { width: TEXT_BOX_WIDTH, height: textLineHeight(s.text.width) }, defaultContent: TEXT_PLACEHOLDER },
+						interaction: { exclusive: true },
+					},
+					// Arrow, line, rectangle, ellipse: drag to draw. No tap-to-insert, so a stray pen tap leaves nothing behind.
+					...Object.values(SHAPE_TOOL).map((id) => ({
+						id,
+						defaults: { strokeColor: s.shape.color, strokeWidth: s.shape.width, opacity: s.shape.opacity, color: "transparent" },
+						clickBehavior: { enabled: false },
+						interaction: { exclusive: true },
+					})),
 				] as any,
 			}),
 			createPluginRegistration(CapturePluginPackage, { scale: 2, imageType: "image/png", withAnnotations: true }),
@@ -208,15 +226,59 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		// Before the guard, so its listeners see events first and the guard's work counts in the timings.
 		const penLog = new PenLog(root, tools, host.penLog, () => host.settings().penTimingLog);
 		const guard = new PointerGuard(root, tools, host.settings, host.onChange);
+		const offTextTaps = keepTapsInTextBox(root, () => tools.tool === "text");
 		const annotations: any = (registry.getPlugin("annotation") as any)?.provides();
 		const scoped = annotations?.forDocument(documentId);
+		/** Text boxes with a change waiting to be committed: true when it is typed text. */
+		const textEdits = new Map<string, boolean>();
+		/**
+		 * PDFium reads a text box's font back only for Helvetica (other standard fonts come back as
+		 * Unknown, -1); the font we set is also in the annotation's custom data, so put it back.
+		 * Not an edit: the file is not marked changed. Not native to EmbedPDF.
+		 */
+		let restoringFonts = false;
+		const restoreTextFonts = () => {
+			const wrong = (scoped?.getAnnotations?.() ?? []).map((t: any) => t?.object).filter((o: any) => o?.type === FREETEXT && typeof o.custom?.pdfInkFont === "number" && o.fontFamily !== o.custom.pdfInkFont);
+			if (!wrong.length) return;
+			restoringFonts = true;
+			try {
+				tools.quietly(() => wrong.forEach((o: any) => scoped.updateAnnotation(o.pageIndex, o.id, { fontFamily: o.custom.pdfInkFont })));
+			} finally {
+				restoringFonts = false;
+			}
+		};
 		const offAnn = scoped?.onAnnotationEvent?.((event: any) => {
+			if (event.type === "loaded") restoreTextFonts();
 			// Commits re-emit every event with committed: true; only new edits mark the file dirty.
-			if (event.type !== "loaded" && !event.committed) host.onChange();
+			if (event.type !== "loaded" && !event.committed && !restoringFonts) host.onChange();
 			// A new stamp carries its image bytes; keep them so it shows at once (see stamp.tsx).
 			if (event.type === "create" && !event.committed && event.annotation?.type === PdfAnnotationSubtype.STAMP && event.ctx?.data) rememberStampSource(event.annotation.id, event.ctx.data);
 			if (event.type === "delete" && event.committed) forgetStampSource(event.annotation?.id);
+			// Typing in a text box ended (EmbedPDF writes the text on blur): once that is committed, drop a box left
+			// empty or untouched, or grow it to fit its text. Not native to EmbedPDF.
+			// A new font or size can need a bigger box too.
+			if (event.type === "update" && event.annotation?.type === FREETEXT && event.patch) {
+				const id = event.annotation.id, pageIndex = event.pageIndex ?? event.annotation.pageIndex;
+				if (!event.committed) {
+					if (typeof event.patch.contents === "string") textEdits.set(id, true);
+					else if ("fontFamily" in event.patch || "fontSize" in event.patch) textEdits.set(id, textEdits.get(id) ?? false);
+				} else if (textEdits.has(id)) {
+					const typed = textEdits.get(id);
+					textEdits.delete(id);
+					setTimeout(() => {
+						const current = scoped?.getAnnotationById?.(id)?.object;
+						if (!current) return;
+						const text = (current.contents ?? "").trim();
+						if (typed && (!text || text === TEXT_PLACEHOLDER)) return void scoped.deleteAnnotation(pageIndex, id);
+						const size = pagesRef.current[pageIndex]?.size;
+						const rect = size && fitTextBox(current, size);
+						// Not an undo step of its own: undoing the text leaves the box size, which is harmless.
+						if (rect) tools.quietly(() => scoped.updateAnnotation(pageIndex, id, { rect }));
+					}, 0);
+				}
+			}
 		});
+		restoreTextFonts();
 		const capture: any = (registry.getPlugin("capture") as any)?.provides()?.forDocument(documentId);
 		const offCapture = capture?.onCaptureArea?.((e: any) => setArea({ pageIndex: e.pageIndex, rect: toRect(e.rect) }));
 		const offTools = tools.subscribe(() => bump((n) => n + 1));
@@ -278,6 +340,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 			offAnn?.();
 			offCapture?.();
 			offTools();
+			offTextTaps();
 			guard.destroy();
 			penLog.destroy();
 			tools.destroy();
@@ -351,16 +414,19 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		);
 	};
 
-	/** Pen strokes take the pen palette; ink and text highlights take the highlight palette. A mixed selection gets both. */
+	/** Each kind of annotation takes its tool's palette (pen, highlighters, text, shapes); a mixed selection gets them all. */
 	const paletteFor = (objects: any[]): string[] => {
 		const pen = objects.some((o) => o?.type === 15 && o.intent !== "InkHighlight");
 		const hl = objects.some((o) => o?.type === 9 || (o?.type === 15 && o.intent === "InkHighlight"));
-		return [...new Set([...(pen ? settings.penColors : []), ...(hl ? settings.highlightColors : [])])];
+		const text = objects.some((o) => o?.type === FREETEXT && o.intent !== "FreeTextCallout");
+		const shape = objects.some((o) => o?.type === LINE || o?.type === SQUARE || o?.type === CIRCLE);
+		return [...new Set([...(pen ? settings.penColors : []), ...(hl ? settings.highlightColors : []), ...(text ? settings.textColors : []), ...(shape ? settings.shapeColors : [])])];
 	};
+	const colorOf = (o: any): string | undefined => (o?.type === FREETEXT ? o.fontColor : o?.strokeColor)?.toLowerCase();
 	const Swatches = ({ objects }: { objects: any[] }) => {
 		const colors = paletteFor(objects);
 		if (!colors.length) return null;
-		const shared = objects.every((o) => o?.strokeColor?.toLowerCase() === objects[0]?.strokeColor?.toLowerCase()) ? objects[0]?.strokeColor?.toLowerCase() : null;
+		const shared = objects.every((o) => colorOf(o) === colorOf(objects[0])) ? colorOf(objects[0]) : null;
 		const items = objects.map((o) => ({ pageIndex: o.pageIndex, id: o.id }));
 		return (
 			<>
@@ -381,6 +447,26 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		return (
 			<Menu wrapperProps={menuWrapperProps} placement={placement}>
 					{a && <Swatches objects={[a]} />}
+					{a?.type === FREETEXT && (() => {
+						// Bold and italic of this box; the family and alignment stay as they are.
+						const f = { ...settings.textFormat, ...fontFormat(a.fontFamily), align: (["left", "center", "right"] as const)[a.textAlign] ?? "left" };
+						return (
+							<>
+								<button class={"pdf-ink-menu-item" + (f.bold ? " is-active" : "")} aria-label="Bold" onClick={() => tools.formatTextBox(a, { bold: !f.bold }, f)}>
+									<b>B</b>
+								</button>
+								<button class={"pdf-ink-menu-item" + (f.italic ? " is-active" : "")} aria-label="Italic" onClick={() => tools.formatTextBox(a, { italic: !f.italic }, f)}>
+									<i style={{ fontFamily: "Times, serif" }}>I</i>
+								</button>
+							</>
+						);
+					})()}
+					{(a?.type === LINE || a?.type === SQUARE || a?.type === CIRCLE) &&
+						LINE_STYLES.map((ls) => (
+							<button key={ls} class={"pdf-ink-menu-item" + (lineStyleOf(a) === ls ? " is-active" : "")} aria-label={`${ls[0].toUpperCase()}${ls.slice(1)} line`} onClick={() => tools.setAnnotationLineStyle(a, ls)}>
+								<LineStyleGlyph style={ls} />
+							</button>
+						))}
 					{a && (
 						<button class="pdf-ink-menu-item" aria-label="Copy link to annotation" onClick={() => copyLink(pageIndex, toRect(a.rect), a.custom?.text ?? a.contents ?? `p.${pageIndex + 1}`, settings.areaLinkFormats[0]?.template ?? "[[{{file}}#page={{page}}&rect={{rect}}]]", a.strokeColor ?? "")}>
 							<Icon name="link" />

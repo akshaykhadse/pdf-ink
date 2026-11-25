@@ -36,8 +36,7 @@ interface PagePoint {
 	scale: number;
 }
 
-const INK = 15;
-const HIGHLIGHT = 9;
+const FREETEXT = 3, LINE = 4, SQUARE = 5, CIRCLE = 6, HIGHLIGHT = 9, INK = 15;
 /** A touch this close to the pen's contact point (CSS px) is the pen itself. */
 const PEN_TOUCH_RADIUS = 48;
 /** Pen buttons that mean "erase": primary while hovering (S Pen), barrel (2) or eraser end (32). */
@@ -52,8 +51,37 @@ function segmentDistance(px: number, py: number, ax: number, ay: number, bx: num
 	return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-/** Whether an ink stroke or text highlight is within `radius` page units of the point. */
+/** Whether an ink stroke, highlight, text box, line or shape is within `radius` page units of the point. */
 export function annotationHit(a: any, x: number, y: number, radius: number): boolean {
+	const box = a?.rect, o = box?.origin, sz = box?.size;
+	if (a?.type === FREETEXT) {
+		// A text box goes when the eraser touches it anywhere.
+		return !!o && !!sz && x >= o.x - radius && x <= o.x + sz.width + radius && y >= o.y - radius && y <= o.y + sz.height + radius;
+	}
+	if (a?.type === LINE) {
+		const p = a.linePoints;
+		if (!p?.start || !p?.end) return false;
+		return segmentDistance(x, y, p.start.x, p.start.y, p.end.x, p.end.y) <= radius + (a.strokeWidth ?? 1) / 2;
+	}
+	if (a?.type === SQUARE || a?.type === CIRCLE) {
+		// Outlines only: the eraser has to cross the border, as with a stroke (the inside is empty).
+		if (!o || !sz) return false;
+		const w = a.strokeWidth ?? 1, r = radius + w / 2;
+		const left = o.x + w / 2, top = o.y + w / 2, right = o.x + sz.width - w / 2, bottom = o.y + sz.height - w / 2;
+		if (a.type === SQUARE) {
+			const corners: [number, number][] = [[left, top], [right, top], [right, bottom], [left, bottom]];
+			return corners.some(([ax, ay], i) => segmentDistance(x, y, ax, ay, corners[(i + 1) % 4][0], corners[(i + 1) % 4][1]) <= r);
+		}
+		const cx = (left + right) / 2, cy = (top + bottom) / 2, rx = Math.max(0, (right - left) / 2), ry = Math.max(0, (bottom - top) / 2);
+		const n = 48;
+		let px = cx + rx, py = cy;
+		for (let i = 1; i <= n; i++) {
+			const t = (i / n) * 2 * Math.PI, qx = cx + rx * Math.cos(t), qy = cy + ry * Math.sin(t);
+			if (segmentDistance(x, y, px, py, qx, qy) <= r) return true;
+			(px = qx), (py = qy);
+		}
+		return false;
+	}
 	if (a?.type === HIGHLIGHT) {
 		const boxes: any[] = Array.isArray(a.segmentRects) && a.segmentRects.length ? a.segmentRects : a.rect ? [a.rect] : [];
 		return boxes.some((b) => {
@@ -72,7 +100,7 @@ export function annotationHit(a: any, x: number, y: number, radius: number): boo
 	return false;
 }
 
-const LINE = 4, SQUARE = 5, CIRCLE = 6, POLYGON = 7, POLYLINE = 8;
+const POLYGON = 7, POLYLINE = 8;
 
 const filled = (a: any) => !!a.color && a.color !== "transparent";
 
