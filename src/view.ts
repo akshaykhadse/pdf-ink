@@ -1,6 +1,8 @@
 import { FileView, Notice, Scope, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import type PdfInkPlugin from "./main";
-import { ReadingPosition, ViewerHandle, mountViewer } from "./viewer";
+import { PageAction, ReadingPosition, ViewerHandle, mountViewer } from "./viewer";
+import { PageEdit, editPdfPages } from "./pages";
+import { ConfirmModal } from "./settings";
 import { Backlink, LinkVars, collectBacklinks, deliverLink, openBacklink, openSidecar } from "./links";
 
 export const VIEW_TYPE = "pdf-ink";
@@ -39,6 +41,7 @@ export class PdfInkView extends FileView {
 		});
 		// Undo, redo and delete, unless a text box or an input has the keys.
 		const key = (fn: () => void) => () => {
+			if (this.editingPages) return false;
 			const el: any = this.containerEl.ownerDocument.activeElement;
 			if (el?.isContentEditable || el?.tagName === "INPUT" || el?.tagName === "TEXTAREA") return true;
 			if (!this.handle) return true;
@@ -194,6 +197,8 @@ export class PdfInkView extends FileView {
 			if (token !== this.openToken || this.handle !== handle) return done();
 			const got = handle.position();
 			if (got && got.page === pos.page && Math.abs(got.y - pos.y) <= 1) return done();
+			// Already scrolled as far up as it goes: the rest is the viewport gap.
+			if (got && got.page === pos.page && y === 0 && got.y >= pos.y && got.y - pos.y < 30) return done();
 			if (got && got.page === pos.page && Math.abs(got.y - pos.y) < 60) y = Math.max(0, y - (got.y - pos.y));
 			handle.restore({ page: pos.page, y });
 			if (++tries < 25) setTimeout(tick, 120);
@@ -213,17 +218,18 @@ export class PdfInkView extends FileView {
 		this.dirty = false;
 	}
 
-	private async loadPdf(file: TFile) {
+	/** Opens `file` in a new viewer; after a page edit, with the new bytes, the spot to show and the zoom to keep. */
+	private async loadPdf(file: TFile, reopen?: { bytes: ArrayBuffer; position: ReadingPosition; zoom: unknown }) {
 		const token = ++this.openToken;
 		this.unmountViewer();
 		this.openToken = token;
 		this.rootEl.empty();
 		this.rootEl.addClass("is-loading");
 		// A remembered spot: the layout's first scroll reports must not overwrite it before it is restored.
-		const remembered = this.pendingSubpath ? null : this.plugin.positionFor(file.path);
+		const remembered = reopen?.position ?? (this.pendingSubpath ? null : this.plugin.positionFor(file.path));
 		this.restoring = !!remembered && (remembered.page > 1 || remembered.y > 0);
 		try {
-			const [engine, bytes] = await Promise.all([this.plugin.getEngine(), this.app.vault.readBinary(file)]);
+			const [engine, bytes] = await Promise.all([this.plugin.getEngine(), reopen?.bytes ?? this.app.vault.readBinary(file)]);
 			if (token !== this.openToken) return;
 			const mounted = mountViewer(this.rootEl, {
 				engine,
@@ -243,11 +249,14 @@ export class PdfInkView extends FileView {
 					// The layout's first scroll events report the top of the document: not until the old spot is restored.
 					positionChanged: (pos) => !this.restoring && this.plugin.rememberPosition(file.path, pos),
 					penLog: (text) => void this.plugin.appendPenLog(text),
+					editPages: (action) => this.requestPageEdit(action),
 				},
 				onReady: (handle) => {
 					if (token !== this.openToken) return;
 					this.handle = handle;
 					this.rootEl.removeClass("is-loading");
+					// A zoom the reader set by hand survives a page edit; fit width, the default, comes back by itself.
+					if (typeof reopen?.zoom === "number") handle.setZoomLevel(reopen.zoom);
 					if (this.pendingSubpath) {
 						const sub = this.pendingSubpath;
 						this.pendingSubpath = null;
@@ -270,6 +279,81 @@ export class PdfInkView extends FileView {
 			this.restoring = false;
 			console.error("[pdf-ink] open failed", e);
 			new Notice(`PDF Ink couldn't open ${file.name}: ${e?.message ?? e}`);
+		}
+	}
+
+	// ------------------------------------------------------------------- pages
+
+	/** From the toolbar or a command: acts on the page in view. Deleting asks first. */
+	requestPageEdit(action: PageAction) {
+		const handle = this.handle;
+		if (!handle || this.editingPages) return;
+		const { page, pages } = handle.tools.state();
+		if (action === "delete") {
+			if (pages <= 1) return void new Notice("A PDF needs at least one page.");
+			new ConfirmModal(this.app, "Delete page", `Delete page ${page} of ${pages}, with everything written on it? Links to later pages will point one page off.`, "Delete", () => void this.editPages({ kind: "delete", index: page - 1 })).open();
+			return;
+		}
+		const size = handle.pageSize(page - 1);
+		if (!size) return;
+		void this.editPages({ kind: "insert", at: action === "insertAfter" ? page : page - 1, ...size });
+	}
+
+	/** True while a page is added or deleted: commands and keys leave the document alone. */
+	editingPages = false;
+
+	/**
+	 * Saves the PDF with the page added or removed and reopens it at that page.
+	 * EmbedPDF 2.15's viewer cannot change its page list, so the open document
+	 * is replaced; the undo history starts afresh, as after reopening the file.
+	 */
+	async editPages(edit: PageEdit): Promise<boolean> {
+		const file = this.file;
+		if (!file || !this.handle || this.editingPages) return false;
+		this.editingPages = true;
+		// No strokes while the copy is made: they would not be in it.
+		this.rootEl.inert = true;
+		this.rootEl.addClass("is-busy");
+		try {
+			// Waits for an autosave in flight, then holds off others until the new file is open.
+			await new Promise((r) => setTimeout(r, 80));
+			while (this.saving) await this.saving;
+			const handle = this.handle;
+			if (!handle || file !== this.file) return false;
+			let result: { bytes: ArrayBuffer; position: ReadingPosition; zoom: unknown } | null = null;
+			const work = (this.saving = (async () => {
+				try {
+					// Nothing unsaved: the file on disk is the document, and reading it is quicker than exporting.
+					const [engine, current] = await Promise.all([this.plugin.getEngine(), this.dirty ? handle.save() : this.app.vault.readBinary(file)]);
+					const bytes = await editPdfPages(engine, current, edit);
+					if (handle !== this.handle || file !== this.file) return false;
+					this.ignoreModifyUntil = Date.now() + 2000;
+					await this.app.vault.modifyBinary(file, bytes);
+					this.ignoreModifyUntil = Date.now() + 1000;
+					this.dirty = false;
+					const page = edit.kind === "insert" ? edit.at + 1 : Math.min(edit.index + 1, handle.tools.state().pages - 1);
+					result = { bytes, position: { page, y: 0 }, zoom: handle.zoomLevel() };
+					return true;
+				} catch (e: any) {
+					console.error("[pdf-ink] page edit failed", e);
+					new Notice(`PDF Ink couldn't ${edit.kind === "insert" ? "add the page" : "delete the page"}: ${e?.message ?? e}`);
+					return false;
+				}
+			})());
+			try {
+				await work;
+			} finally {
+				if (this.saving === work) this.saving = null;
+			}
+			if (!result) return false;
+			const done: { bytes: ArrayBuffer; position: ReadingPosition; zoom: unknown } = result;
+			await this.loadPdf(file, done);
+			new Notice(`${edit.kind === "insert" ? `Added a blank page ${done.position.page}` : `Deleted page ${edit.index + 1}`}. Undo starts afresh; links to later pages are now one page off.`, 6000);
+			return true;
+		} finally {
+			this.editingPages = false;
+			this.rootEl.inert = false;
+			this.rootEl.removeClass("is-busy");
 		}
 	}
 

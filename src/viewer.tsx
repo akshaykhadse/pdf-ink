@@ -56,7 +56,11 @@ export interface ViewerHost {
 	positionChanged(pos: ReadingPosition): void;
 	/** Appends text to the pen timing log (a diagnostic). */
 	penLog(text: string): void;
+	/** Adds a blank page after or before the current page, or deletes the current page. */
+	editPages(action: PageAction): void;
 }
+
+export type PageAction = "insertAfter" | "insertBefore" | "delete";
 
 /** Where the reader is: the topmost visible page and the offset into it in PDF points. */
 export interface ReadingPosition {
@@ -81,6 +85,11 @@ export interface ViewerHandle {
 	position(): ReadingPosition | null;
 	/** Scrolls back to a remembered position without animation. */
 	restore(pos: ReadingPosition): void;
+	/** Size of a page (0-based) in PDF points before its /Rotate, and that rotation in quarter turns. */
+	pageSize(pageIndex: number): { width: number; height: number; rotation: number } | null;
+	/** The zoom as set by the reader: a mode such as "fit-width", or a number. */
+	zoomLevel(): unknown;
+	setZoomLevel(level: unknown): void;
 }
 
 export interface ViewerProps {
@@ -290,6 +299,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 			bump((n) => n + 1);
 		});
 		const scroll: any = (registry.getPlugin("scroll") as any)?.provides()?.forDocument(documentId);
+		const zoomScope: any = (registry.getPlugin("zoom") as any)?.provides()?.forDocument(documentId);
 		const position = (metrics?: any): ReadingPosition | null => {
 			const m = metrics ?? scroll?.getMetrics?.();
 			const first = m?.pageVisibilityMetrics?.[0];
@@ -322,6 +332,12 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 				setBacklinks((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
 			},
 			position: () => position(),
+			pageSize: (i) => {
+				const page: any = pagesRef.current[i];
+				return page?.size ? { width: page.size.width, height: page.size.height, rotation: page.rotation ?? 0 } : null;
+			},
+			zoomLevel: () => zoomScope?.getState?.()?.zoomLevel,
+			setZoomLevel: (level) => level !== undefined && zoomScope?.requestZoom?.(level),
 			restore: (pos) => scroll?.scrollToPage?.({ pageNumber: pos.page, pageCoordinates: { x: 0, y: pos.y }, behavior: "instant" }),
 			goTo: (subpath) => {
 				const sub = parseSubpath(subpath);
@@ -508,7 +524,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		<AnnotationRendererProvider>
 		<PdfInkRenderers />
 		<div class={"pdf-ink" + (settings.darkPages === "always" ? " is-dark-pages" : settings.darkPages === "theme" ? " is-dark-theme-pages" : "")} ref={rootRef}>
-			<Toolbar tools={tools} settings={settings} onOpenSidecar={host.openSidecar} />
+			<Toolbar tools={tools} settings={settings} onOpenSidecar={host.openSidecar} onEditPages={host.editPages} />
 			<GlobalPointerProvider documentId={documentId} class="pdf-ink-global">
 			<Viewport documentId={documentId} class="pdf-ink-viewport">
 				<ZoomGestureWrapper documentId={documentId} class="pdf-ink-zoom">

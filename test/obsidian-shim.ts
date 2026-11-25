@@ -57,6 +57,11 @@ export class TFile {
 export class Plugin {}
 export class Modal {
 	constructor(_app: any) {}
+	/** The tests answer a dialog through window.modals. */
+	open() {
+		((window as any).modals ??= []).push(this);
+	}
+	close() {}
 }
 export class PluginSettingTab {
 	constructor(_app: any, _plugin: any) {}
