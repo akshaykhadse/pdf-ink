@@ -29,6 +29,21 @@ const PATCHES = [
 		find: "for (const [uid, ta] of Object.entries(docState.byUid)) {",
 		replace: "for (const uid in docState.byUid) { const ta = docState.byUid[uid];",
 	},
+	// Not native: the engine (inlined into the worker as a string, so the patterns carry a literal \n) reads an ink
+	// annotation's /IT but never writes it, and writes a line's /IT but never reads it. A highlighter
+	// stroke reopened as a pen stroke, and an arrow as a plain line.
+	{
+		file: /@embedpdf[\\/]engines[\\/]dist[\\/]lib[\\/]pdfium[\\/]web[\\/]worker-engine\.js$/,
+		why: "ink annotations lose their intent (InkHighlight) when saved",
+		find: String.raw`setInkList(doc, page, annotationPtr, annotation.inkList)) {\n      return false;\n    }\n`,
+		replace: String.raw`setInkList(doc, page, annotationPtr, annotation.inkList)) {\n      return false;\n    }\n    if (annotation.intent) this.setAnnotIntent(annotationPtr, annotation.intent);\n`,
+	},
+	{
+		file: /@embedpdf[\\/]engines[\\/]dist[\\/]lib[\\/]pdfium[\\/]web[\\/]worker-engine\.js$/,
+		why: "line annotations lose their intent (LineArrow) when read",
+		find: String.raw`type: PdfAnnotationSubtype.LINE,\n      rect,`,
+		replace: String.raw`type: PdfAnnotationSubtype.LINE,\n      rect,\n      ...(() => { const intent = this.getAnnotIntent(annotationPtr); return intent ? { intent } : {}; })(),`,
+	},
 ];
 
 const embedPdfPatches = {

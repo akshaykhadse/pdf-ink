@@ -34,9 +34,20 @@ export const SHAPE_TOOL: Record<ShapeKind, string> = { arrow: "lineArrow", line:
 const EMBED_TOOL: Record<string, string> = { pen: "ink", marker: "inkHighlighter", textHighlight: "highlight", image: "stamp", text: "freeText" };
 
 /** Which styled tool an existing annotation belongs to (for restyling a selection), or null. */
+/**
+ * A highlighter stroke: EmbedPDF marks it with the InkHighlight intent. Strokes saved before the
+ * intent was written (see the build patches) come back without it, but keep the multiply blend
+ * the highlighter draws with, which the pen never uses.
+ */
+export function isMarker(o: any): boolean {
+	return o?.type === INK && (o.intent === "InkHighlight" || (!o.intent && o.blendMode === MULTIPLY));
+}
+/** PdfBlendMode.Multiply */
+const MULTIPLY = 1;
+
 export function toolOfAnnotation(o: any): ToolId | null {
 	if (!o) return null;
-	if (o.type === INK) return o.intent === "InkHighlight" ? "marker" : "pen";
+	if (o.type === INK) return isMarker(o) ? "marker" : "pen";
 	if (o.type === HIGHLIGHT) return "textHighlight";
 	if (o.type === FREETEXT && o.intent !== "FreeTextCallout") return "text";
 	if (o.type === LINE || o.type === SQUARE || o.type === CIRCLE) return "shape";
