@@ -91,10 +91,11 @@
  * Pointer tool, text first: unselected annotations do not take presses, so a drag over
  * a stroke or highlight selects the text beneath (the guard turns a tap back into a
  * selection). A selected annotation's move/resize layer and menu are not first children,
- * so they stay clickable; backlink boxes never take presses (the guard opens them on
+ * so they stay clickable, and so does a multi-selection's box (EmbedPDF's
+ * data-group-selection-box, for moving, resizing and rotating the group); backlink boxes never take presses (the guard opens them on
  * a tap); text being edited in a free-text annotation stays editable.
  */
-.pdf-ink.is-pointer .pdf-ink-page-layers [data-no-interaction] > div:first-child * {
+.pdf-ink.is-pointer .pdf-ink-page-layers [data-no-interaction]:not([data-group-selection-box]) > div:first-child * {
 	pointer-events: none !important;
 }
 .pdf-ink.is-pointer .pdf-ink-page-layers [data-no-interaction] > div:first-child [contenteditable="true"],

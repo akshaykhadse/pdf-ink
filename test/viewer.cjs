@@ -214,6 +214,27 @@ const { start, tinyPng, out, root } = require("./lib.cjs");
 	await click('.pdf-ink-toolbar [aria-label="Redo"]');
 	await page.waitForTimeout(300);
 	check("redo recolours them again", (await api(`ann.getAnnotations().every((a) => a.object.strokeColor === "#e03131")`)) === true);
+	// A drag that starts inside the group's box moves the whole group (not a new box), as one undo step.
+	{
+		const ys = () => api(`ann.getAnnotations().map((a) => a.object.rect.origin.y)`);
+		const before = await ys();
+		const box = await page.evaluate(() => {
+			// The attribute sits on a zero-height wrapper; the box is the element that takes the move.
+			const g = document.querySelector(".pdf-ink-page-layers [data-group-selection-box]");
+			const r = [...(g?.querySelectorAll("div") ?? [])].find((e) => getComputedStyle(e).cursor === "move")?.getBoundingClientRect();
+			return r && [r.x, r.y, r.width, r.height];
+		});
+		await drag(box[0] + box[2] / 2, box[1] + box[3] / 2, box[0] + box[2] / 2, box[1] + box[3] / 2 + 70, 10, 400);
+		const after = await ys();
+		const still = await api(`ann.getSelectedAnnotations().length`);
+		check("pointer: dragging inside a multi-selection moves every selected stroke", still === 3 && after.every((v, i) => v > before[i] + 20), JSON.stringify({ before, after, still }));
+		await click('.pdf-ink-toolbar [aria-label="Undo"]');
+		await page.waitForTimeout(300);
+		const undone = await ys();
+		check("one undo puts the whole group back", undone.every((v, i) => Math.abs(v - before[i]) < 0.5), JSON.stringify({ before, undone }));
+		await page.mouse.click(x - 200, y + 400);
+		await page.waitForTimeout(200);
+	}
 	await drag(x + 320, y - 40, x - 20, y + 160, 10, 400);
 	check("the strokes are selected again for the delete check", (await api(`ann.getSelectedAnnotations().length`)) === 3);
 	// A real mouse click: the menu must sit outside the selection box's handle layer.
