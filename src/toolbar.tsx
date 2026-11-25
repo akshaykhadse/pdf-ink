@@ -10,6 +10,7 @@ import type { ComponentChildren } from "preact";
 import { Icon } from "./icon";
 import { LINE_ENDS, LINE_STYLES, SHAPE_KINDS, TEXT_ALIGNS, TEXT_FONTS, type LineEnd, type LineStyle, type Settings, type ShapeKind, type TextFont } from "./settings";
 import { STYLED_TOOLS, ToolController, ToolId } from "./tools";
+import type { PageAction } from "./viewer";
 
 const MAX_LEVEL = 4;
 
@@ -46,11 +47,12 @@ interface Props {
 	tools: ToolController;
 	settings: Settings;
 	onOpenSidecar(): void;
+	onEditPages(action: PageAction): void;
 }
 
-type Popover = "options" | "tools" | "more" | null;
+type Popover = "options" | "tools" | "more" | "pages" | null;
 
-export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
+export function Toolbar({ tools, settings, onOpenSidecar, onEditPages }: Props) {
 	const [, bump] = useState(0);
 	useEffect(() => tools.subscribe(() => bump((n) => n + 1)), [tools]);
 	const state = tools.state();
@@ -145,6 +147,11 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 			<span class="pdf-ink-page-total">/ {state.pages}</span>
 		</span>
 	);
+	const pagesButton = (
+		<button class={"pdf-ink-btn pdf-ink-pages-btn" + (popover === "pages" ? " is-active" : "")} aria-label="Add or delete pages" onClick={() => setPopover(popover === "pages" ? null : "pages")}>
+			<Icon name="file-plus-2|file-plus" />
+		</button>
+	);
 	const historyControls = (
 		<>
 			<button class="pdf-ink-btn" aria-label="Undo" disabled={!state.canUndo} onClick={() => tools.undo()}>
@@ -170,6 +177,14 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 		<button class="pdf-ink-menu-item" disabled={disabled} onClick={() => (onClick(), setPopover(null))}>
 			<Icon name={icon} /> {label}
 		</button>
+	);
+
+	const pagesMenu = (
+		<>
+			{menuItem("file-plus-2|file-plus", `Add blank page after page ${state.page}`, () => onEditPages("insertAfter"))}
+			{menuItem("file-plus-2|file-plus", `Add blank page before page ${state.page}`, () => onEditPages("insertBefore"))}
+			{menuItem("file-x-2|file-x|trash-2", `Delete page ${state.page}…`, () => onEditPages("delete"), state.pages <= 1)}
+		</>
 	);
 
 	return (
@@ -205,7 +220,12 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 					</button>
 				</div>
 				{level < 3 && <div class="pdf-ink-group">{historyControls}</div>}
-				{level < 2 && <div class="pdf-ink-group">{pageControl}</div>}
+				{level < 2 && (
+					<div class="pdf-ink-group">
+						{pageControl}
+						{pagesButton}
+					</div>
+				)}
 				{level < 2 && <div class="pdf-ink-group">{zoomControls}</div>}
 				{level < 3 && <div class="pdf-ink-group">{viewControls}</div>}
 				{level >= 2 && (
@@ -226,6 +246,7 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 					<div class="pdf-ink-group">{drawTools.map(toolButton)}</div>
 				</Pop>
 			)}
+			{popover === "pages" && <Pop menu>{pagesMenu}</Pop>}
 			{popover === "more" && (
 				<Pop menu>
 					{level >= 3 && menuItem("undo-2", "Undo", () => tools.undo(), !state.canUndo)}
@@ -236,6 +257,7 @@ export function Toolbar({ tools, settings, onOpenSidecar }: Props) {
 					</div>
 					{menuItem("move-horizontal|arrow-left-right", "Fit width", () => tools.fitWidth())}
 					{menuItem("maximize", "Fit page", () => tools.fitPage())}
+					{pagesMenu}
 					{level >= 3 && menuItem("notebook-pen|notebook|file-text", "Open sidecar note", onOpenSidecar)}
 					{level >= 3 && menuItem(state.fullscreen ? "minimize-2" : "maximize-2", state.fullscreen ? "Exit full screen" : "Full screen", () => tools.toggleFullscreen())}
 				</Pop>

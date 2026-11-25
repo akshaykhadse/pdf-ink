@@ -76,6 +76,9 @@ export default class PdfInkPlugin extends Plugin {
 		this.addCommand({ id: "toggle-stylus-mode", name: "Toggle stylus mode", checkCallback: withTools((t) => t.setStylusMode(!this.settings.stylusMode)) });
 		// One command per tool, so each can have a hotkey.
 		for (const [id, name] of TOOL_COMMANDS) this.addCommand({ id: `tool-${id}`, name: `Tool: ${name}`, checkCallback: withTools((t) => t.setTool(id)) });
+		this.addCommand({ id: "add-page-after", name: "Add a blank page after the current page", checkCallback: withView((v) => v.requestPageEdit("insertAfter")) });
+		this.addCommand({ id: "add-page-before", name: "Add a blank page before the current page", checkCallback: withView((v) => v.requestPageEdit("insertBefore")) });
+		this.addCommand({ id: "delete-page", name: "Delete the current page", checkCallback: withView((v) => v.requestPageEdit("delete")) });
 		this.addCommand({ id: "undo", name: "Undo", checkCallback: withTools((t) => t.undo()) });
 		this.addCommand({ id: "redo", name: "Redo", checkCallback: withTools((t) => t.redo()) });
 		this.addCommand({ id: "delete-selected", name: "Delete selected annotations", checkCallback: withTools((t) => t.deleteSelected()) });

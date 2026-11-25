@@ -430,7 +430,7 @@ export class PdfInkSettingTab extends PluginSettingTab {
 					.setButtonText("Reset to defaults")
 					.setWarning()
 					.onClick(() =>
-						new ConfirmModal(this.app, "Reset all PDF Ink settings to their defaults?", "Reset", async () => {
+						new ConfirmModal(this.app, "Reset settings", "Reset all PDF Ink settings to their defaults?", "Reset", async () => {
 							Object.assign(this.plugin.settings, defaultSettings());
 							await save();
 							this.display();
@@ -441,13 +441,13 @@ export class PdfInkSettingTab extends PluginSettingTab {
 }
 
 /** A yes/no dialog; `onConfirm` runs only on the confirm button. */
-class ConfirmModal extends Modal {
-	constructor(app: App, private readonly message: string, private readonly confirmText: string, private readonly onConfirm: () => void | Promise<void>) {
+export class ConfirmModal extends Modal {
+	constructor(app: App, private readonly title: string, private readonly message: string, private readonly confirmText: string, private readonly onConfirm: () => void | Promise<void>) {
 		super(app);
 	}
 
 	onOpen(): void {
-		this.titleEl.setText("Reset settings");
+		this.titleEl.setText(this.title);
 		this.contentEl.createEl("p", { text: this.message });
 		new Setting(this.contentEl)
 			.addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))

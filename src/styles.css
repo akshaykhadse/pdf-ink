@@ -647,3 +647,20 @@ body.pdf-ink-fullscreen-hide-chrome .workspace-ribbon {
 .theme-dark .pdf-ink.is-dark-theme-pages .pdf-ink-page .pdf-ink-area-menu {
 	filter: invert(1) hue-rotate(180deg);
 }
+
+/* A page is being added or deleted: the file is rewritten, then reopened. */
+.pdf-ink-root.is-busy {
+	cursor: progress;
+}
+.pdf-ink-root.is-busy::after {
+	content: "Updating pages…";
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: color-mix(in srgb, var(--background-primary) 60%, transparent);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	z-index: 50;
+}
