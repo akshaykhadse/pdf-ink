@@ -16,6 +16,8 @@ export class PdfInkView extends FileView {
 	/** Bumped per open, so a load that finishes after the file changed is dropped. */
 	private openToken = 0;
 	dirty = false;
+	/** Bumped on every change, so a save can tell whether something changed while it ran. */
+	private changes = 0;
 	private saving: Promise<boolean> | null = null;
 	private ignoreModifyUntil = 0;
 	private readonly requestAutosave: () => void;
@@ -35,6 +37,19 @@ export class PdfInkView extends FileView {
 			void this.saveNow(true);
 			return false;
 		});
+		// Undo, redo and delete, unless a text box or an input has the keys.
+		const key = (fn: () => void) => () => {
+			const el: any = this.containerEl.ownerDocument.activeElement;
+			if (el?.isContentEditable || el?.tagName === "INPUT" || el?.tagName === "TEXTAREA") return true;
+			if (!this.handle) return true;
+			fn();
+			return false;
+		};
+		this.scope.register(["Mod"], "z", key(() => this.handle?.tools.undo()));
+		this.scope.register(["Mod", "Shift"], "z", key(() => this.handle?.tools.redo()));
+		this.scope.register(["Mod"], "y", key(() => this.handle?.tools.redo()));
+		this.scope.register([], "Delete", key(() => this.handle?.tools.deleteSelected()));
+		this.scope.register([], "Backspace", key(() => this.handle?.tools.deleteSelected()));
 		this.scope.register([], "Escape", () => {
 			if (!this.fullscreen) return true;
 			this.setFullscreen(false);
@@ -42,6 +57,11 @@ export class PdfInkView extends FileView {
 		});
 		this.requestAutosave = debounce(() => void this.saveNow(false), AUTOSAVE_QUIET_MS, true);
 		this.requestBacklinks = debounce(() => this.handle?.refreshBacklinks(), 400, true);
+	}
+
+	/** The open document's tools, once it is open. */
+	get tools() {
+		return this.handle?.tools ?? null;
 	}
 
 	getViewType() {
@@ -211,14 +231,14 @@ export class PdfInkView extends FileView {
 				name: file.name,
 				host: {
 					settings: () => this.plugin.settings,
-					saveSettings: () => void this.plugin.saveSettings(),
+					saveSettings: () => this.plugin.saveSettingsSoon(),
 					onChange: () => this.markDirty(),
 					setFullscreen: (on) => this.setFullscreen(on),
 					isFullscreen: () => this.fullscreen,
 					linkVars: (page, rect, text, color) => this.linkVars(file, page, rect, text, color),
 					deliverLink: (text) => deliverLink(this.app, this.plugin.settings, file, text),
 					backlinks: () => this.backlinks(file),
-					openBacklink: (link: Backlink) => void openBacklink(this.app, link, file.path),
+					openBacklink: (link: Backlink) => void openBacklink(this.app, link),
 					openSidecar: () => void openSidecar(this.app, this.plugin.settings, file, this.leaf).catch((e) => new Notice(`PDF Ink: ${e?.message ?? e}`)),
 					// The layout's first scroll events report the top of the document: not until the old spot is restored.
 					positionChanged: (pos) => !this.restoring && this.plugin.rememberPosition(file.path, pos),
@@ -274,6 +294,7 @@ export class PdfInkView extends FileView {
 
 	private markDirty() {
 		this.dirty = true;
+		this.changes++;
 		if (this.plugin.settings.autosave) this.requestAutosave();
 	}
 
@@ -288,13 +309,15 @@ export class PdfInkView extends FileView {
 			return true;
 		}
 		const saving = (this.saving = (async () => {
+			// A change made while the PDF is exported may be missing from these bytes: it stays dirty.
+			const changesBefore = this.changes;
 			try {
 				const bytes = await handle.save();
 				if (handle !== this.handle || file !== this.file) {
 					console.warn("[pdf-ink] file changed while saving; nothing written");
 					return false;
 				}
-				this.dirty = false;
+				if (this.changes === changesBefore) this.dirty = false;
 				this.ignoreModifyUntil = Date.now() + 2000;
 				await this.app.vault.modifyBinary(file, bytes);
 				this.ignoreModifyUntil = Date.now() + 1000;
@@ -313,7 +336,9 @@ export class PdfInkView extends FileView {
 		} finally {
 			if (this.saving === saving) this.saving = null;
 		}
-		if (!ok && !closing && this.dirty && this.plugin.settings.autosave) this.requestAutosave();
+		if (!closing && this.dirty && this.plugin.settings.autosave) this.requestAutosave();
+		// Closing: write what changed during this save as well.
+		else if (closing && ok && this.dirty) return this.saveNow(false, true);
 		return ok;
 	}
 }

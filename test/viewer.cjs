@@ -1,161 +1,13 @@
 // End-to-end checks in headless Chromium: open a PDF, use every tool with mouse,
 // pen and fingers, fold the toolbar, make links, save and reopen.
-const { chromium } = require("playwright");
+// These checks run in order on one page; newer scenarios live in test/scenarios.cjs.
 const fs = require("fs");
 const path = require("path");
-
-/** A solid 2-colour PNG of the given size, for the image tool. */
-function tinyPng(w, h, alpha = false) {
-	const zlib = require("zlib");
-	const crc = (buf) => {
-		let c = ~0;
-		for (const b of buf) {
-			c ^= b;
-			for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1;
-		}
-		return (~c) >>> 0;
-	};
-	const chunk = (type, data) => {
-		const len = Buffer.alloc(4);
-		len.writeUInt32BE(data.length);
-		const td = Buffer.concat([Buffer.from(type), data]);
-		const c = Buffer.alloc(4);
-		c.writeUInt32BE(crc(td));
-		return Buffer.concat([len, td, c]);
-	};
-	const ihdr = Buffer.alloc(13);
-	ihdr.writeUInt32BE(w, 0);
-	ihdr.writeUInt32BE(h, 4);
-	const bpp = alpha ? 4 : 3;
-	ihdr[8] = 8; ihdr[9] = alpha ? 6 : 2; // 8-bit RGB or RGBA
-	const raw = Buffer.alloc((w * bpp + 1) * h);
-	for (let r = 0; r < h; r++) {
-		raw[r * (w * bpp + 1)] = 0;
-		for (let cx = 0; cx < w; cx++) raw.set(alpha ? [200, 40, 40, 255] : [200, 40, 40], r * (w * bpp + 1) + 1 + cx * bpp);
-	}
-	return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
-}
-
-const root = path.resolve(__dirname, "..");
-const out = path.join(__dirname, "out");
-fs.mkdirSync(out, { recursive: true });
-
-/** A simple PDF with `pages` pages of Helvetica text, written by hand. */
-function makePdf(pages) {
-	const objs = [];
-	const add = (body) => objs.push(body) && objs.length;
-	add("<< /Type /Catalog /Pages 2 0 R >>");
-	add("");
-	const font = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-	const kids = [];
-	for (let i = 0; i < pages; i++) {
-		let text = `BT /F1 24 Tf 60 760 Td (Page ${i + 1} of ${pages}) Tj ET\n`;
-		for (let l = 0; l < 20; l++) text += `BT /F1 12 Tf 60 ${700 - l * 28} Td (Line ${l + 1}: the quick brown fox jumps over the lazy dog.) Tj ET\n`;
-		const content = add(`<< /Length ${text.length} >>\nstream\n${text}endstream`);
-		kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${content} 0 R >>`));
-	}
-	objs[1] = `<< /Type /Pages /Count ${pages} /Kids [${kids.map((k) => `${k} 0 R`).join(" ")}] >>`;
-	let pdf = "%PDF-1.4\n";
-	const offsets = [];
-	objs.forEach((o, i) => {
-		offsets.push(pdf.length);
-		pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
-	});
-	const xref = pdf.length;
-	pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offsets.map((o) => String(o).padStart(10, "0") + " 00000 n \n").join("") + `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-	return Buffer.from(pdf, "latin1");
-}
-fs.writeFileSync(path.join(out, "sample.pdf"), makePdf(3));
-fs.writeFileSync(path.join(out, "long.pdf"), makePdf(30));
-
-const html = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"><style>html,body{margin:0;height:100%;--background-secondary:#eee;--background-primary:#fff;--background-primary-alt:#ddd;--text-muted:#555;--text-normal:#111;--background-modifier-border:#ccc;--background-modifier-hover:#ddd;--interactive-accent:#36f;--radius-s:4px;--font-ui-small:12px}#leaf{width:1200px;height:1300px;position:relative}.view-content{height:100%}</style></head><body><div id="leaf" class="workspace-leaf-content"><div id="content" class="view-content"></div></div><script src="/harness.js"></script></body></html>`;
-const files = {
-	"/harness.js": [path.join(out, "harness.js"), "text/javascript"],
-	"/styles.css": [path.join(root, "styles.css"), "text/css"],
-	"/sample.pdf": [path.join(out, "sample.pdf"), "application/pdf"],
-	"/long.pdf": [path.join(out, "long.pdf"), "application/pdf"],
-	"/pdfium.wasm": [path.join(root, "pdfium.wasm"), "application/wasm"],
-};
+const { start, tinyPng, out, root } = require("./lib.cjs");
 
 (async () => {
-	const browser = await chromium.launch();
-	const context = await browser.newContext({ viewport: { width: 1200, height: 1300 }, hasTouch: true });
-	const page = await context.newPage();
-	const cdp = await context.newCDPSession(page);
-	page.on("console", (m) => {
-		if (m.type() === "error" || m.text().startsWith("NOTICE:")) console.log("[console]", m.text().slice(0, 300));
-	});
-	page.on("pageerror", (e) => console.log("[pageerror]", e.message));
-	await page.route("http://test/**", async (route) => {
-		const u = new URL(route.request().url()).pathname;
-		if (u === "/") return route.fulfill({ status: 200, contentType: "text/html", body: html });
-		const f = files[u];
-		if (!f) return route.fulfill({ status: 404, body: "nf " + u });
-		route.fulfill({ status: 200, contentType: f[1], body: fs.readFileSync(f[0]) });
-	});
-	let failed = false;
-	const check = (name, ok, detail) => {
-		console.log(`${ok ? "ok  " : "FAIL"} ${name}${detail !== undefined ? ": " + detail : ""}`);
-		if (!ok) failed = true;
-	};
-	const api = (expr) =>
-		page.evaluate((e) => {
-			const h = window.view.handle;
-			const reg = h.registry;
-			const id = h.documentId;
-			const tools = h.tools;
-			const ann = reg.getPlugin("annotation").provides().forDocument(id);
-			const zoom = reg.getPlugin("zoom").provides().forDocument(id);
-			const scroll = reg.getPlugin("scroll").provides().forDocument(id);
-			const im = reg.getPlugin("interaction-manager").provides().forDocument(id);
-			return eval(e);
-		}, expr);
-	const ready = async () => {
-		for (let i = 0; i < 200; i++) {
-			if (await page.evaluate(() => !!window.view?.handle && document.querySelectorAll(".pdf-ink-page img").length > 0)) return true;
-			await page.waitForTimeout(100);
-		}
-		return false;
-	};
-	const pageRect = (index = 0) => page.evaluate((i) => document.querySelector(`.pdf-ink-page[data-page-index="${i}"]`)?.getBoundingClientRect().toJSON(), index);
-	const click = (sel) => page.evaluate((s) => document.querySelector(s).click(), sel);
-	const tool = (id) => click(`.pdf-ink-toolbar [data-tool="${id}"]`).then(() => page.waitForTimeout(80));
-	const drag = async (x0, y0, x1, y1, steps = 10, settle = 300) => {
-		await page.mouse.move(x0, y0);
-		await page.mouse.down();
-		for (let i = 1; i <= steps; i++) await page.mouse.move(x0 + ((x1 - x0) * i) / steps, y0 + ((y1 - y0) * i) / steps);
-		await page.mouse.up();
-		await page.waitForTimeout(settle);
-	};
-	const stroke = async (x, y) => {
-		await page.mouse.move(x, y);
-		await page.mouse.down();
-		for (let i = 1; i <= 10; i++) await page.mouse.move(x + i * 8, y + (i % 2) * 10);
-		await page.mouse.up();
-		await page.waitForTimeout(400);
-	};
-	const count = () => api(`ann.getAnnotations().length`);
-	const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts.map(([x, y]) => ({ x, y, radiusX: 10, radiusY: 10 })) });
-	const fingerSwipe = async (x, y, dx, dy) => {
-		await touch("touchStart", [[x, y]]);
-		for (let i = 1; i <= 8; i++) {
-			await touch("touchMove", [[x + (dx * i) / 8, y + (dy * i) / 8]]);
-			await page.waitForTimeout(16);
-		}
-		await touch("touchEnd", []);
-		await page.waitForTimeout(500);
-	};
-	const scrollTop = () => page.evaluate(() => document.querySelector(".pdf-ink-viewport").scrollTop);
-	const setScroll = (v) => page.evaluate((s) => (document.querySelector(".pdf-ink-viewport").scrollTop = s), v).then(() => page.waitForTimeout(300));
-	const pen = (type, cx, cy, extra) =>
-		page.evaluate(
-			([type, cx, cy, extra]) => {
-				const target = document.elementFromPoint(cx, cy);
-				target.dispatchEvent(new PointerEvent(type, { pointerType: "pen", pointerId: 7, isPrimary: true, bubbles: true, cancelable: true, clientX: cx, clientY: cy, ...extra }));
-			},
-			[type, cx, cy, extra]
-		);
-
+	const h = await start();
+	const { browser, context, page, cdp, check, api, ready, pageRect, click, tool, drag, stroke, count, touch, fingerSwipe, scrollTop, setScroll, pen } = h;
 	await page.goto("http://test/");
 	// Two notes link to the PDF: one with a rect, one by page only.
 	await page.evaluate(() => {
@@ -282,6 +134,11 @@ const files = {
 	await stroke(x + 4, y + 2);
 	const over = await api(`[ann.getAnnotations().length, ann.getSelectedAnnotations().length]`);
 	check("a stroke starting on an earlier stroke draws rather than selecting it", over[0] === 2 && over[1] === 0, JSON.stringify(over));
+	// The runtime hooks into EmbedPDF's internals must still engage (an EmbedPDF update could break them silently).
+	const memo = await page.evaluate(() => ({ ...window.memoStats }));
+	check("the annotation memo wraps EmbedPDF's containers and skips unchanged ones", memo.wrapped > 0 && memo.skipped > 0, JSON.stringify(memo));
+	check("stroke smoothing hooks EmbedPDF's createAnnotation", await api(`!!reg.getPlugin("annotation").__pdfInkRawCreate`));
+	check("quiet changes can detach EmbedPDF's annotation history", await api(`"history" in reg.getPlugin("annotation") && !!reg.getPlugin("annotation").history`));
 	// opacity slider
 	await openStyle();
 	await page.evaluate(() => {
@@ -670,6 +527,31 @@ const files = {
 	const closedSave = await page.evaluate(() => window.saved.length);
 	check("closing right after a stroke saves it", closedSave === 1, closedSave);
 
+	// A stroke drawn while a save is exporting the PDF must still be written (it is not in those bytes).
+	await page.evaluate(() => window.view.onLoadFile(window.file));
+	await ready();
+	await tool("pen");
+	{
+		const r = await pageRect(0);
+		await page.evaluate(() => {
+			const h = window.view.handle, orig = h.save;
+			h.save = async () => { const b = await orig(); await new Promise((res) => setTimeout(res, 600)); return b; };
+		});
+		await stroke(r.x + 100, r.y + 300);
+		const before = await count();
+		const saving = page.evaluate(() => window.view.saveNow(false));
+		await page.waitForTimeout(50);
+		await stroke(r.x + 100, r.y + 420);
+		await saving;
+		const dirtyAfter = await page.evaluate(() => window.view.dirty);
+		await page.evaluate(() => window.view.flush());
+		await page.evaluate(() => window.view.onLoadFile(window.file));
+		await ready();
+		await page.waitForTimeout(500);
+		const after = await count();
+		check("a stroke drawn while a save runs stays unsaved, then is written", dirtyAfter === true && after === before + 1, JSON.stringify({ dirtyAfter, before, after }));
+	}
+
 	// --- long document
 	await page.evaluate(() => window.run("/long.pdf"));
 	check("a 30-page PDF opens", await ready());
@@ -898,7 +780,7 @@ const files = {
 	check("the text and line load back from the saved PDF", back.length === shapesBefore && back.some((o) => o.type === 3 && o.contents === typed), `${back.length} of ${shapesBefore}: ${back.map((o) => o.type + ":" + (o.contents ?? "")).join("; ")}`);
 	await page.screenshot({ path: path.join(out, "shapes.png") });
 	await browser.close();
-	if (failed) process.exit(1);
+	if (h.failed()) process.exit(1);
 })().catch((e) => {
 	console.error("FAILED", e);
 	process.exit(1);

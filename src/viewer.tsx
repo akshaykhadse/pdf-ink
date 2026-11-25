@@ -30,12 +30,12 @@ import { installInkSmoothing } from "./ink";
 import { PdfInkRenderers } from "./ink-preview";
 import { installAnnotationMemo } from "./memo-annotations";
 import { forgetStampSource, rememberStampSource } from "./stamp";
-import { FREETEXT, LINE, SQUARE, CIRCLE, SHAPE_TOOL, ToolController } from "./tools";
+import { FREETEXT, HIGHLIGHT, INK, LINE, SQUARE, CIRCLE, SHAPE_TOOL, ToolController, toolOfAnnotation } from "./tools";
 import { fontFormat, lineStyleOf } from "./formats";
-import { LineStyleGlyph } from "./toolbar";
+import { LineStyleGlyph, dotSize } from "./toolbar";
 import { LINE_STYLES } from "./settings";
 import { TEXT_BOX_WIDTH, TEXT_PLACEHOLDER, fitTextBox, keepTapsInTextBox, textLineHeight } from "./text-box";
-import { Backlink, LinkVars, PageRect, fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "./links";
+import { Backlink, LinkVars, PageRect, fillTemplate, linkText, parseSubpath, rectFromParam, rectParam } from "./links";
 import { Icon } from "./icon";
 
 /** What the Obsidian view provides to the viewer. */
@@ -281,7 +281,14 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		restoreTextFonts();
 		const capture: any = (registry.getPlugin("capture") as any)?.provides()?.forDocument(documentId);
 		const offCapture = capture?.onCaptureArea?.((e: any) => setArea({ pageIndex: e.pageIndex, rect: toRect(e.rect) }));
-		const offTools = tools.subscribe(() => bump((n) => n + 1));
+		// The toolbar follows zoom, page, history and styles itself; the pages only change with the tool or the settings.
+		let seenTool = tools.tool, seenSettings = tools.settingsVersion;
+		const offTools = tools.subscribe(() => {
+			if (tools.tool === seenTool && tools.settingsVersion === seenSettings) return;
+			seenTool = tools.tool;
+			seenSettings = tools.settingsVersion;
+			bump((n) => n + 1);
+		});
 		const scroll: any = (registry.getPlugin("scroll") as any)?.provides()?.forDocument(documentId);
 		const position = (metrics?: any): ReadingPosition | null => {
 			const m = metrics ?? scroll?.getMetrics?.();
@@ -309,7 +316,11 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 				tools.pushAllStyles();
 				tools.notify();
 			},
-			refreshBacklinks: () => setBacklinks(host.backlinks()),
+			refreshBacklinks: () => {
+				// Obsidian re-resolves links after edits anywhere in the vault: re-render only when this PDF's backlinks changed.
+				const next = host.backlinks();
+				setBacklinks((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+			},
 			position: () => position(),
 			restore: (pos) => scroll?.scrollToPage?.({ pageNumber: pos.page, pageCoordinates: { x: 0, y: pos.y }, behavior: "instant" }),
 			goTo: (subpath) => {
@@ -384,7 +395,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 				const s = host.settings().textHighlight;
 				const ann = tools.annotations();
 				ann?.createAnnotation(pageIndex, {
-					type: 9,
+					type: HIGHLIGHT,
 					id: uuidV4(),
 					pageIndex,
 					rect: { origin: { x: rect.x, y: rect.y }, size: { width: rect.width, height: rect.height } },
@@ -416,8 +427,8 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 
 	/** Each kind of annotation takes its tool's palette (pen, highlighters, text, shapes); a mixed selection gets them all. */
 	const paletteFor = (objects: any[]): string[] => {
-		const pen = objects.some((o) => o?.type === 15 && o.intent !== "InkHighlight");
-		const hl = objects.some((o) => o?.type === 9 || (o?.type === 15 && o.intent === "InkHighlight"));
+		const pen = objects.some((o) => o?.type === INK && o.intent !== "InkHighlight");
+		const hl = objects.some((o) => o?.type === HIGHLIGHT || (o?.type === INK && o.intent === "InkHighlight"));
 		const text = objects.some((o) => o?.type === FREETEXT && o.intent !== "FreeTextCallout");
 		const shape = objects.some((o) => o?.type === LINE || o?.type === SQUARE || o?.type === CIRCLE);
 		return [...new Set([...(pen ? settings.penColors : []), ...(hl ? settings.highlightColors : []), ...(text ? settings.textColors : []), ...(shape ? settings.shapeColors : [])])];
@@ -467,6 +478,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 								<LineStyleGlyph style={ls} />
 							</button>
 						))}
+					{a && toolOfAnnotation(a) && <StyleControls o={a} tools={tools} settings={settings} />}
 					{a && (
 						<button class="pdf-ink-menu-item" aria-label="Copy link to annotation" onClick={() => copyLink(pageIndex, toRect(a.rect), a.custom?.text ?? a.contents ?? `p.${pageIndex + 1}`, settings.areaLinkFormats[0]?.template ?? "[[{{file}}#page={{page}}&rect={{rect}}]]", a.strokeColor ?? "")}>
 							<Icon name="link" />
@@ -495,7 +507,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 	return (
 		<AnnotationRendererProvider>
 		<PdfInkRenderers />
-		<div class="pdf-ink" ref={rootRef}>
+		<div class={"pdf-ink" + (settings.darkPages === "always" ? " is-dark-pages" : settings.darkPages === "theme" ? " is-dark-theme-pages" : "")} ref={rootRef}>
 			<Toolbar tools={tools} settings={settings} onOpenSidecar={host.openSidecar} />
 			<GlobalPointerProvider documentId={documentId} class="pdf-ink-global">
 			<Viewport documentId={documentId} class="pdf-ink-viewport">
@@ -513,7 +525,7 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 										<RenderLayer documentId={documentId} pageIndex={pageIndex} scale={1} class="pdf-ink-base" />
 										<TilingLayer documentId={documentId} pageIndex={pageIndex} class="pdf-ink-tiles" />
 										{settings.showBacklinks && links.length > 0 && (
-											<div class={"pdf-ink-backlinks" + (tools.tool === "pointer" ? " is-clickable" : "")}>
+											<div class="pdf-ink-backlinks">
 												{links.map((b, i) => {
 													const r = rectFromParam(b.rect!, pageHeight);
 													if (!r) return null;
@@ -566,4 +578,55 @@ function Viewer({ documentId, host, onReady }: ViewerProps & { documentId: strin
 		</div>
 		</AnnotationRendererProvider>
 	);
+}
+
+/**
+ * Width (or text size) and opacity of one selected annotation, behind a single
+ * menu button so the menu stays small. Each pick is one undo step.
+ */
+function StyleControls({ o, tools, settings }: { o: any; tools: ToolController; settings: Settings }) {
+	const [open, setOpen] = useState(false);
+	const tool = toolOfAnnotation(o);
+	const sizes = tool === "pen" ? settings.penWidths : tool === "marker" ? settings.markerWidths : tool === "shape" ? settings.shapeWidths : tool === "text" ? settings.textSizes : [];
+	const current = tool === "text" ? o.fontSize : o.strokeWidth;
+	const color = (tool === "text" ? o.fontColor : o.strokeColor) ?? "currentColor";
+	return (
+		<>
+			<button class={"pdf-ink-menu-item" + (open ? " is-active" : "")} aria-label="Width and opacity" aria-expanded={open} onClick={() => setOpen(!open)}>
+				<Icon name="sliders-horizontal|settings-2" />
+			</button>
+			{open && (
+				<div class="pdf-ink-menu-row pdf-ink-menu-style">
+					{sizes.map((w) => (
+						<button key={w} class={"pdf-ink-swatch" + (current === w ? " is-active" : "")} aria-label={tool === "text" ? `Text size ${w}` : `Width ${w}`} onClick={() => tools.restyle(o, { width: w })}>
+							{tool === "text" ? <span class="pdf-ink-size">{w}</span> : <span class="pdf-ink-bar" style={{ height: dotSize(w), background: color }} />}
+						</button>
+					))}
+					<span class="pdf-ink-opacity">
+						<Icon name="blend|droplet" />
+						<OpacitySlider value={o.opacity ?? 1} onCommit={(v) => tools.restyle(o, { opacity: v })} />
+					</span>
+				</div>
+			)}
+		</>
+	);
+}
+
+/**
+ * An opacity slider that changes the annotation once, when it is let go (one
+ * undo step), not on every tick. A native change listener: EmbedPDF loads
+ * preact/compat, which turns onChange into onInput.
+ */
+function OpacitySlider({ value, onCommit }: { value: number; onCommit(v: number): void }) {
+	const ref = useRef<HTMLInputElement>(null);
+	const commit = useRef(onCommit);
+	commit.current = onCommit;
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		const changed = () => commit.current(Number(el.value) / 100);
+		el.addEventListener("change", changed);
+		return () => el.removeEventListener("change", changed);
+	}, []);
+	return <input ref={ref} type="range" min={5} max={100} step={5} defaultValue={String(Math.round(value * 100))} aria-label="Opacity" />;
 }

@@ -5,6 +5,20 @@ import { DEFAULT_SETTINGS, PdfInkSettingTab, Settings, normalizeSettings } from 
 import type { ReadingPosition } from "./viewer";
 import { PdfInkView, VIEW_TYPE } from "./view";
 import { openSidecar } from "./links";
+import type { ToolController, ToolId } from "./tools";
+
+const TOOL_COMMANDS: [ToolId, string][] = [
+	["hand", "Hand"],
+	["pointer", "Pointer"],
+	["pen", "Pen"],
+	["marker", "Highlighter"],
+	["textHighlight", "Text highlighter"],
+	["text", "Text"],
+	["shape", "Shapes"],
+	["eraser", "Eraser"],
+	["areaLink", "Area link"],
+	["image", "Image"],
+];
 
 export default class PdfInkPlugin extends Plugin {
 	settings: Settings = { ...DEFAULT_SETTINGS };
@@ -53,7 +67,18 @@ export default class PdfInkPlugin extends Plugin {
 				if (v.file) void openSidecar(this.app, this.settings, v.file, v.leaf).catch((e) => new Notice(`PDF Ink: ${e?.message ?? e}`));
 			}),
 		});
-		this.addCommand({ id: "toggle-stylus-mode", name: "Toggle stylus mode", checkCallback: withView((v) => (v as any).handle?.tools.setStylusMode(!this.settings.stylusMode)) });
+		const withTools = (fn: (tools: ToolController) => void) => (checking: boolean) => {
+			const tools = this.app.workspace.getActiveViewOfType(PdfInkView)?.tools;
+			if (!tools) return false;
+			if (!checking) fn(tools);
+			return true;
+		};
+		this.addCommand({ id: "toggle-stylus-mode", name: "Toggle stylus mode", checkCallback: withTools((t) => t.setStylusMode(!this.settings.stylusMode)) });
+		// One command per tool, so each can have a hotkey.
+		for (const [id, name] of TOOL_COMMANDS) this.addCommand({ id: `tool-${id}`, name: `Tool: ${name}`, checkCallback: withTools((t) => t.setTool(id)) });
+		this.addCommand({ id: "undo", name: "Undo", checkCallback: withTools((t) => t.undo()) });
+		this.addCommand({ id: "redo", name: "Redo", checkCallback: withTools((t) => t.redo()) });
+		this.addCommand({ id: "delete-selected", name: "Delete selected annotations", checkCallback: withTools((t) => t.deleteSelected()) });
 
 		this.registerEvent(
 			this.app.vault.on("rename", (file, oldPath) => {
@@ -83,11 +108,12 @@ export default class PdfInkPlugin extends Plugin {
 		// Save what the open views hold before the engine goes away.
 		// Views are flushed but not detached: Obsidian keeps the leaves and restores them when the plugin reloads.
 		const views = this.app.workspace.getLeavesOfType(VIEW_TYPE);
-		const timeout = new Promise<void>((r) => setTimeout(r, 4000));
-		await Promise.race([Promise.all(views.map((leaf) => (leaf.view as PdfInkView).flush().catch(() => {}))), timeout]);
+		const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+		// A big PDF can take a while to export: give the saves their own time before the engine goes.
+		await Promise.race([Promise.all(views.map((leaf) => (leaf.view as PdfInkView).flush().catch(() => {}))), wait(10000)]);
 		const enginePromise = this.engine;
 		this.engine = null;
-		const engine = await Promise.race([enginePromise?.catch(() => null), timeout]);
+		const engine = await Promise.race([enginePromise?.catch(() => null), wait(4000)]);
 		try {
 			engine?.destroy?.();
 		} catch (e) {
@@ -97,6 +123,11 @@ export default class PdfInkPlugin extends Plugin {
 		this.wasmUrl = null;
 		this.restorePdfExtension();
 		document.body.removeClass("pdf-ink-fullscreen-active", "pdf-ink-fullscreen-hide-chrome");
+		if (this.soonTimer) {
+			clearTimeout(this.soonTimer);
+			this.soonTimer = null;
+			await this.saveData({ ...this.settings, positions: prunePositions(this.positions) });
+		}
 	}
 
 	/**
@@ -168,6 +199,20 @@ export default class PdfInkPlugin extends Plugin {
 			this.positionsTimer = null;
 			void this.saveSettings(false);
 		}, 2000);
+	}
+
+	private soonTimer: ReturnType<typeof setTimeout> | null = null;
+	/**
+	 * Saves a change made on a toolbar (a colour, a width, the opacity slider)
+	 * once the user pauses, instead of on every tap or slider tick. The toolbar
+	 * has already pushed the change into its own viewer.
+	 */
+	saveSettingsSoon() {
+		if (this.soonTimer) clearTimeout(this.soonTimer);
+		this.soonTimer = setTimeout(() => {
+			this.soonTimer = null;
+			void this.saveSettings();
+		}, 500);
 	}
 
 	/** Persists the settings and the reading positions; `fromTab` pushes the settings into the open viewers too. */

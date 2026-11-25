@@ -3,6 +3,10 @@ import { createPdfiumEngine } from "@embedpdf/engines/pdfium-worker-engine";
 import { TFile } from "obsidian";
 import { PdfInkView } from "../src/view";
 import { DEFAULT_SETTINGS, normalizeSettings } from "../src/settings";
+import { memoStats } from "../src/memo-annotations";
+(window as any).memoStats = memoStats;
+(window as any).normalizeSettings = normalizeSettings;
+(window as any).DEFAULT_SETTINGS = DEFAULT_SETTINGS;
 
 declare global {
 	interface Window {
@@ -76,7 +80,7 @@ window.run = async (pdfUrl = "/sample.pdf") => {
 		return createPdfiumEngine(url, { fontFallback: null });
 	})();
 	window.positions ??= {};
-	const plugin = { settings: window.settings, saveSettings: async () => {}, getEngine: () => enginePromise, positionFor: (p: string) => window.positions[p] ?? null, rememberPosition: (p: string, pos: any) => (window.positions[p] = pos), appendPenLog: async (t: string) => void ((window as any).penLog = ((window as any).penLog ?? "") + t) };
+	const plugin = { settings: window.settings, saveSettings: async () => {}, saveSettingsSoon: () => {}, getEngine: () => enginePromise, positionFor: (p: string) => window.positions[p] ?? null, rememberPosition: (p: string, pos: any) => (window.positions[p] = pos), appendPenLog: async (t: string) => void ((window as any).penLog = ((window as any).penLog ?? "") + t) };
 	const leaf: any = { app };
 	const view = new PdfInkView(leaf, plugin as any);
 	(view as any).file = file;

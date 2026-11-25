@@ -37,8 +37,16 @@ export class Notice {
 	}
 }
 export class Scope {
+	/** Registered keys as "Mod+Shift+z" → handler; the tests call `press`. */
+	keys: Record<string, () => boolean | void> = {};
 	constructor(_parent?: any) {}
-	register() {}
+	register(mods: string[], key: string, fn: () => boolean | void) {
+		this.keys[[...mods, key].join("+")] = fn;
+	}
+	/** What Obsidian does on a key: runs the handler; false means it was handled. */
+	press(combo: string): boolean | void {
+		return this.keys[combo]?.();
+	}
 }
 export class TFile {
 	name = "";

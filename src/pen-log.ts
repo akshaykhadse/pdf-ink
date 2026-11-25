@@ -67,15 +67,21 @@ export class PenLog {
 		on("pointermove", (e) => this.onMove(e));
 		on("pointerup", (e) => this.onUp(e, false), this.win);
 		on("pointercancel", (e) => this.onUp(e, true), this.win);
+	}
+
+	/** Long tasks are watched only once the log is on (it is a diagnostic, off by default). */
+	private observing = false;
+	private observeLongTasks() {
+		if (this.observing) return;
+		this.observing = true;
 		const PO = (this.win as any).PerformanceObserver;
-		if (PO?.supportedEntryTypes?.includes("longtask")) {
-			const obs = new PO((list: any) => {
-				for (const e of list.getEntries()) this.longTasks.push({ t: e.startTime, d: e.duration });
-				if (this.longTasks.length > 200) this.longTasks.splice(0, this.longTasks.length - 200);
-			});
-			obs.observe({ type: "longtask" });
-			this.off.push(() => obs.disconnect());
-		}
+		if (!PO?.supportedEntryTypes?.includes("longtask")) return;
+		const obs = new PO((list: any) => {
+			for (const e of list.getEntries()) this.longTasks.push({ t: e.startTime, d: e.duration });
+			if (this.longTasks.length > 200) this.longTasks.splice(0, this.longTasks.length - 200);
+		});
+		obs.observe({ type: "longtask" });
+		this.off.push(() => obs.disconnect());
 	}
 
 	private header() {
@@ -108,7 +114,9 @@ export class PenLog {
 	}
 
 	private onDown(e: PointerEvent) {
-		if (!this.enabled() || !this.drawing() || this.count >= MAX_STROKES) return;
+		if (!this.enabled()) return;
+		this.observeLongTasks();
+		if (!this.drawing() || this.count >= MAX_STROKES) return;
 		if (e.pointerType === "touch" && this.tools.stylusMode) return; // a finger scrolls
 		if (this.stroke) return;
 		const now = performance.now();

@@ -1,7 +1,7 @@
 // Pure-function checks, run with node after bundling (test/out/units.cjs).
 import { smoothStroke } from "../src/ink";
 import { fillTemplate, linkText, parseSubpath, rectFromParam, rectParam, union } from "../src/links";
-import { DEFAULT_SETTINGS, defaultSettings, normalizeSettings, parseColors, parseNumbers } from "../src/settings";
+import { DEFAULT_SETTINGS, defaultSettings, ignoredParts, normalizeSettings, parseColors, parseLinkFormats, parseNumbers } from "../src/settings";
 import { annotationHit, tapHit } from "../src/guard";
 import { dotSize } from "../src/toolbar";
 import { fitTextBox, wrapLines } from "../src/text-box";
@@ -49,6 +49,20 @@ check("smoothStroke drops duplicate samples", smoothStroke([{ x: 0, y: 0 }, { x:
 // eraser hit test
 const ink = { type: 15, strokeWidth: 2, inkList: [{ points: [{ x: 0, y: 0 }, { x: 10, y: 0 }] }] };
 check("annotationHit finds an ink segment within the radius", annotationHit(ink, 5, 2, 1.5) && !annotationHit(ink, 5, 5, 1.5));
+{
+	// A page of 460 strokes of 80 points (a busy page of a real notebook): the rect check skips the far ones.
+	const strokes = Array.from({ length: 460 }, (_, i) => {
+		const x0 = (i % 20) * 28, y0 = Math.floor(i / 20) * 36;
+		const points = Array.from({ length: 80 }, (_, k) => ({ x: x0 + k * 0.3, y: y0 + Math.sin(k / 5) * 4 }));
+		return { type: 15, strokeWidth: 2, inkList: [{ points }], rect: { origin: { x: x0 - 1, y: y0 - 5 }, size: { width: 25, height: 10 } } };
+	});
+	const withRect = { ...ink, rect: { origin: { x: -1, y: -1 }, size: { width: 12, height: 2 } } };
+	const t0 = performance.now();
+	let hits = 0;
+	for (let n = 0; n < 20; n++) for (const s of strokes) if (annotationHit(s, 300, 200, 4)) hits++;
+	const ms = (performance.now() - t0) / 20;
+	check("annotationHit rejects strokes by their rect first (busy page under 1 ms per sample)", ms < 1 && annotationHit(withRect, 5, 2, 1.5) && !annotationHit(withRect, 5, 9, 1.5), ms.toFixed(3) + " ms, " + hits / 20 + " hits");
+}
 const hl = { type: 9, segmentRects: [{ origin: { x: 0, y: 0 }, size: { width: 10, height: 4 } }] };
 check("annotationHit finds a highlight box", annotationHit(hl, 11, 2, 2) && !annotationHit(hl, 15, 2, 2));
 const sbox = { origin: { x: 10, y: 10 }, size: { width: 100, height: 50 } };
@@ -89,3 +103,13 @@ check("strokePattern scales dashes with width", JSON.stringify(strokePattern("da
 check("lineStyleOf reads dashes and dots back", lineStyleOf({ strokeStyle: 2, strokeDashArray: [6, 4], strokeWidth: 2 }) === "dashed" && lineStyleOf({ strokeStyle: 2, strokeDashArray: [2, 4], strokeWidth: 2 }) === "dotted" && lineStyleOf({ strokeStyle: 1 }) === "solid");
 check("normalizeSettings repairs text format and line settings", (() => { const n = normalizeSettings({ textFormat: { font: "comic", bold: 1 } as any, shapeLine: { style: "wavy", end: "circle" } as any }); return n.textFormat.font === "sans" && n.textFormat.bold === false && n.shapeLine.style === "solid" && n.shapeLine.end === "circle" && n.shapeLine.start === "none"; })());
 if (failed) process.exit(1);
+
+// settings parsing and the newer settings
+{
+	const pc = parseColors, ns = normalizeSettings;
+	const f = parseLinkFormats("Link: [[{{file}}#page={{page}}]]\nno colon here\nQuote: > {{text}}\\n> p.{{page}}");
+	check("parseLinkFormats reads Name: template lines and turns \\n into line breaks", f.length === 2 && f[1].name === "Quote" && f[1].template === "> {{text}}\n> p.{{page}}", JSON.stringify(f));
+	check("ignoredParts lists what a colour list drops", JSON.stringify(ignoredParts("#ff0000, red, #12", (p: string) => pc(p).length > 0)) === JSON.stringify(["red", "#12"]));
+	const n = ns({ hiddenTools: ["image", "hand", "bogus"], startTool: "nope", lastTool: "marker", darkPages: "sometimes", penButton: "off" } as any);
+	check("normalizeSettings keeps only hideable tools and repairs the new settings", JSON.stringify(n.hiddenTools) === '["image"]' && n.startTool === "hand" && n.lastTool === "marker" && n.darkPages === "off" && n.penButton === "off", JSON.stringify([n.hiddenTools, n.startTool, n.lastTool, n.darkPages, n.penButton]));
+}
